@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- **The chart is drawn on the card.** The grey wells behind the strips are gone: each strip has its gridlines and, under bars, a floor, and nothing else. A new strike lights the strip itself.
+- **One rule for forecast marks.** A forecast is outlined where a measurement is filled: the rain and sunshine bars, the daily temperature ranges, and the key beside the credit.
+- **The ranges are tabs.** Hours, Days, Months and Years are words with a rule under the one in force; Table and CSV keep their buttons.
+- **Daylight on the axis.** A ribbon in the sun's colour marks daylight along the time axis, and night is where it stops.
+- **Colour.** The wind green sits with the other colours instead of darker than all of them, and the Live dot and the dial's petals follow. In dark mode the wind line, the wet-bulb dots and the sun's amber are chosen for the dark surface rather than brightened.
+- **The dial speaks for itself.** The caption under the wind readings is gone; the dial's tooltip still names each mark, and a rose still filling in says so for its first day.
+
 ## 1.3.1
 
 - **A strike lights the strip.** When the station reports a new lightning strike, the lightning chart lights faintly, as a distant flash would, and settles over a second and a half. Once per strike, in every range, never on first paint, and off under reduced motion.

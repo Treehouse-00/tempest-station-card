@@ -69,7 +69,7 @@ The card uses whatever units your entities report: °C or °F, km/h, m/s or mph,
 ## Notes
 
 - **Scales.** Beaufort force follows the WMO, pressure tendency the Met Office, rain intensity the AMS Glossary, dew point comfort the US National Weather Service, and UV index the WHO. The clear-sky curve uses the Haurwitz model.
-- **Honest charts.** Wind, rain and lightning start at zero, and humidity spans 0–100%. Pressure is the station's own reading (not reduced to sea level) and always spans at least 10 hPa, like a barograph, so a steady day looks steady.
+- **Honest charts.** Wind, rain and lightning start at zero, and humidity spans 0–100%. Pressure is the station's own reading (not reduced to sea level) and always spans at least 10 hPa, like a barograph, so a steady day looks steady. A forecast is drawn dashed or outlined, where a measurement is solid.
 - **Privacy.** Everything runs in your browser against your own Home Assistant. The card makes no outside requests.
 - **Forecast credit.** When the forecast comes from Met.no, the card credits MET Norway beside the chart, as their data licence asks.
 - **Motion.** The needle glides, a change of range crossfades, a figure that changes crossfades in place, and a new lightning strike lights its chart once; nothing ever moves the layout. All of it is off when the viewer's system asks for reduced motion.

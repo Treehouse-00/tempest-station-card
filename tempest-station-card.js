@@ -26,6 +26,10 @@
  * hero figure; 48 on a short screen), 32 (headlines), 24, 16, 14 and 12 px.
  * Figures are tabular.
  *
+ * The charts are drawn straight on the card: gridlines and, under bars, a
+ * floor, and nothing else. A forecast is dashed or outlined where a
+ * measurement is solid. Daylight is a ribbon along the time axis.
+ *
  * Motion: the needle glides between samples; a change of range, or of a
  * figure, crossfades over 220 ms; a new lightning strike lights its chart
  * once; nothing moves the layout. All of it is off under
@@ -42,7 +46,7 @@
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.3.1";
+  const VERSION = "1.4.0";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -367,9 +371,9 @@
   display: block;
   --wx-temp: #eb6834; --wx-dew: #1baf7a; --wx-rain: #2a78d6; --wx-sun: #eda100;
   --wx-temp-2: #c44513; --wx-downwind: #d03b3b; --wx-wetbulb: #a68600;
-  --wx-wind: #008300; --wx-pres: #6250d6; --wx-bolt: #e87ba4; --wx-muted: #898781;
-  --wx-grid: #e1e0d9; --wx-axis: #c3c2b7; --wx-wash: rgba(11,11,11,0.035);
-  --wx-good: #0ca30c; --wx-warn: #fab219; --wx-critical: #d03b3b;
+  --wx-wind: #2c8724; --wx-pres: #6250d6; --wx-bolt: #e87ba4; --wx-muted: #898781;
+  --wx-grid: #e1e0d9; --wx-axis: #c3c2b7; --wx-wash: rgba(11,11,11,0.035); --wx-sun-fill: 0.18;
+  --wx-good: #3a9742; --wx-warn: #fab219; --wx-critical: #d03b3b;
   --wx-surface: var(--ha-card-background, var(--card-background-color, #fff));
   --wx-ink: var(--primary-text-color, #0b0b0b);
   --wx-ink2: var(--secondary-text-color, #52514e);
@@ -390,9 +394,9 @@
   -webkit-font-smoothing: antialiased;
 }
 :host(.dark) {
-  --wx-temp: #d95926; --wx-dew: #199e70; --wx-rain: #3987e5; --wx-sun: #c98500;
-  --wx-pres: #9085e9; --wx-bolt: #d55181;
-  --wx-temp-2: #e2825c; --wx-downwind: #f06a5f; --wx-wind: #00a400; --wx-wetbulb: #f2d23b;
+  --wx-temp: #d95926; --wx-dew: #199e70; --wx-rain: #3987e5; --wx-sun: #f2b036; --wx-sun-fill: 0.22;
+  --wx-pres: #9085e9; --wx-bolt: #d55181; --wx-good: #6ec272;
+  --wx-temp-2: #e2825c; --wx-downwind: #f06a5f; --wx-wind: #64bd5b; --wx-wetbulb: #d8bd51;
   --wx-grid: #34342f; --wx-axis: #4a4a43; --wx-wash: rgba(255,255,255,0.045);
 }
 * { box-sizing: border-box; }
@@ -511,6 +515,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .read { font-size: var(--wx-fs-read); line-height: 28px; white-space: nowrap; font-weight: var(--wx-w-medium); font-variant-numeric: tabular-nums; }
 .read .unit { font-weight: var(--wx-w-regular); }
 .cap { margin-top: 6px; line-height: 18px; }
+.cap:empty { display: none; }
 .sunfig svg { display: block; overflow: visible; }
 .mg-head { margin-bottom: 12px; }
 .head-r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-left: auto; }
@@ -518,15 +523,18 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .narrow [data-csv] { display: none; }
 .mg-body { position: relative; }
 .wide .mg-body { flex: 1 1 auto; min-height: 0; }
-.seg { display: inline-flex; border: 1px solid var(--wx-grid); border-radius: 6px; overflow: hidden; }
+/* The ranges are tabs, words with a rule under the one in force; Table and CSV are actions and keep their buttons.
+   Every tab keeps one weight, so a change of range never shifts its neighbours. */
+.seg { display: inline-flex; gap: 14px; }
 .seg button, .tbtn { font: inherit; font-size: var(--wx-fs-small); line-height: 16px; color: var(--wx-ink2); background: none; border: 0; padding: 3px 10px; cursor: pointer; }
 .tbtn { border: 1px solid var(--wx-grid); border-radius: 6px; }
-.seg button + button { border-left: 1px solid var(--wx-grid); }
-.seg button[aria-pressed="true"] { background: var(--wx-wash); color: var(--wx-ink); font-weight: var(--wx-w-medium); }
+.seg button { padding: 4px 0 2px; border-bottom: 2px solid transparent; }
+.seg button[aria-pressed="true"] { color: var(--wx-ink); border-bottom-color: var(--wx-ink); }
 .seg button:hover, .tbtn:hover { color: var(--wx-ink); }
 .seg button:focus-visible, .tbtn:focus-visible { outline: 2px solid var(--primary-color, #2a78d6); outline-offset: 2px; }
 
-/* Meteogram: one time axis for every measure. Each chart sits in its own well, led by a headline tile. */
+/* Meteogram: one time axis for every measure. Each chart is drawn straight on the card, led by a headline tile:
+   its gridlines and its floor are all the frame it has. */
 .mg { display: grid; grid-template-columns: var(--wx-tile, 184px) minmax(0, 1fr); position: relative; outline: none; }
 .mg:focus-visible { outline: 2px solid var(--primary-color, #2a78d6); outline-offset: 4px; border-radius: 4px; }
 /* A finger reads the chart as a mouse does: a drag along it scrubs; a drag up or down still scrolls the page. */
@@ -542,7 +550,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .tile .k { display: inline-block; width: 12px; height: 0; border-top: 2px solid; vertical-align: middle; margin: -2px 6px 0 0; }
 .tile .k.dash { border-top-style: dashed; }
 .tile .k.dot { border-top-style: dotted; border-top-width: 2.5px; }
-.mg-p { min-width: 0; position: relative; border-radius: 8px; background: var(--wx-well); overflow: hidden; }
+.mg-p { min-width: 0; position: relative; overflow: hidden; }
 @keyframes wx-arrive { from { opacity: 0; } to { opacity: 1; } }
 .arrive .mg-p svg, .arrive .sunfig svg, .arrive .dial svg, .arrive .tile .tv { animation: wx-arrive 360ms ease-out both; }
 @media (prefers-reduced-motion: reduce) { .arrive .mg-p svg, .arrive .sunfig svg, .arrive .dial svg, .arrive .tile .tv { animation: none; } }
@@ -556,15 +564,15 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .xf::after { content: attr(data-old); position: absolute; left: 0; top: 0; color: var(--wx-ink); white-space: nowrap; pointer-events: none; animation: wx-fade 220ms ease-out both; }
 @keyframes wx-ink { from { color: transparent; } }
 /* A new strike: the lightning strip lights faintly, as a distant flash would, and settles over a second and a half. */
-.mg-p.flash { animation: wx-flash 1500ms ease-out both; }
-@keyframes wx-flash { from { background: color-mix(in srgb, var(--wx-bolt) 22%, var(--wx-well)); } 30% { background: color-mix(in srgb, var(--wx-bolt) 14%, var(--wx-well)); } }
+.mg-p.flash { border-radius: 8px; animation: wx-flash 1500ms ease-out both; }
+@keyframes wx-flash { from { background: color-mix(in srgb, var(--wx-bolt) 22%, var(--wx-surface)); } 30% { background: color-mix(in srgb, var(--wx-bolt) 14%, var(--wx-surface)); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .mg-ghost { display: none; } .swap > .mg, .swap > .table-wrap, .xf, .mg-p.flash { animation: none; } .xf::after { content: none; } }
 .mg-p svg, .mg-axis svg { display: block; overflow: visible; }
 .mg-axis { grid-column: 2; }
 .mg-key { grid-column: 1; padding: 6px 16px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mg-key i { display: inline-block; vertical-align: middle; margin: -2px 6px 0 0; }
 .mg-key .kd { width: 14px; border-top: 1.5px dashed var(--wx-muted); }
-.mg-key .kb { width: 8px; height: 8px; border-radius: 2px; background: var(--wx-muted); opacity: .5; }
+.mg-key .kb { width: 9px; height: 9px; border-radius: 2px; border: 1px solid var(--wx-muted); }
 .narrow .mg-key { order: 2; padding: 4px 0 0; }
 .tile.m .tv { font-size: var(--wx-fs-read); line-height: 26px; }
 .tile.s { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-top: 8px; }
@@ -576,7 +584,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .narrow .mg-axis { grid-column: 1; }
 .mg-none { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; }
 .tick { font-size: var(--wx-fs-small); fill: var(--wx-ink2); font-variant-numeric: tabular-nums; }
-.tick.halo { paint-order: stroke; stroke: var(--wx-well); stroke-width: 4px; stroke-linejoin: round; }
+.tick.halo { paint-order: stroke; stroke: var(--wx-surface); stroke-width: 4px; stroke-linejoin: round; }
 .tick.day { fill: var(--wx-ink); }
 .tick.now { font-weight: var(--wx-w-medium); }
 .tick.hint { fill: var(--wx-ink2); }
@@ -1378,7 +1386,7 @@ tr.fc td { color: var(--wx-ink2); }
       const sy = (v) => padT + (1 - v / top) * (H - padT - padB);
       const base = sy(0);
       let g = "";
-      if (meas.length > 1) g += `<path d="${areaPath(meas, sx, sy, base, 16 * 60e3)}" fill="var(--wx-sun)" fill-opacity="0.18"/>
+      if (meas.length > 1) g += `<path d="${areaPath(meas, sx, sy, base, 16 * 60e3)}" fill="var(--wx-sun)" style="fill-opacity:var(--wx-sun-fill)"/>
         <path d="${linePath(meas, sx, sy, 16 * 60e3)}" fill="none" stroke="var(--wx-sun)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
       g += `<path d="${linePath(cs, sx, sy, HOUR)}" fill="none" stroke="var(--wx-muted)" stroke-width="1.5" stroke-dasharray="4 4"/>`;
       // The dashed bell names itself on the flank away from now, just outside the curve, where nothing else is drawn.
@@ -1913,7 +1921,7 @@ tr.fc td { color: var(--wx-ink2); }
     _allocate(strips, total, narrow) {
       const base = strips.map((s) => (s.empty ? (narrow ? 32 : 40) : narrow ? Math.max(56, Math.round(s.h * 0.82)) : s.h));
       if (!total) return base;
-      // Nothing to plot anywhere: the empty wells share the height evenly.
+      // Nothing to plot anywhere: the empty strips share the height evenly.
       if (strips.every((s) => s.empty)) { const each = Math.floor(total / strips.length); return strips.map((_, i) => each + (i === 0 ? total - each * strips.length : 0)); }
       const fixed = strips.reduce((a, s, i) => a + (s.empty ? base[i] : 0), 0);
       const wsum = strips.reduce((a, s) => a + (s.empty ? 0 : s.w), 0) || 1;
@@ -1936,7 +1944,7 @@ tr.fc td { color: var(--wx-ink2); }
           if (!active.length) break;
         }
       }
-      // Rounding settles on the first full strip, so the last well lands exactly on the card's bottom line.
+      // Rounding settles on the first full strip, so the last strip lands exactly on the card's bottom line.
       const first = strips.findIndex((s) => !s.empty);
       const diff = total - out.reduce((a, b) => a + b, 0);
       if (first >= 0) out[first] += diff;
@@ -1999,11 +2007,14 @@ tr.fc td { color: var(--wx-ink2); }
           const nt = niceTicks(0, vmax, 2);
           const tick = nt.ticks.filter((v) => v > 0 && v <= top).pop() ?? nt.ticks[1] ?? vmax;
           const sy = (v) => padT + ph - (v / top) * ph;
+          // Bars stand on a floor, the zero line, drawn a hair inside the strip so it is not clipped.
+          g += `<line x1="${padL}" x2="${padL + pw}" y1="${(padT + ph - 0.5).toFixed(1)}" y2="${(padT + ph - 0.5).toFixed(1)}" stroke="var(--wx-axis)"/>`;
           if (H >= 52) g += grid(sy(tick)) + label(f.num(tick, nt.step < 0.1 ? 2 : nt.step < 1 ? 1 : 0), sy(tick));
           s.bars.forEach((b, i) => {
             const slot = sx(b.t1) - sx(b.t0), bw = Math.max(2, Math.min(24, slot - 2));
             const x = sx(b.t0) + (slot - bw) / 2, y = sy(b.v);
-            g += `<path data-bar="${i}" d="${barPath(x, y, bw, padT + ph - y)}" fill="${b.fc ? "var(--wx-muted)" : s.color}"${b.fc ? ' fill-opacity="0.5"' : ""}/>`;
+            // One rule for every forecast mark: outlined, where a measurement is filled.
+            g += `<path data-bar="${i}" d="${barPath(x, y, bw, padT + ph - y)}" ${b.fc ? 'fill="none" stroke="var(--wx-muted)"' : `fill="${s.color}"`}/>`;
           });
           geom.sy = sy;
         } else {
@@ -2033,7 +2044,7 @@ tr.fc td { color: var(--wx-ink2); }
               const slot = sx(r.t1) - sx(r.t0), bw = Math.max(4, Math.min(16, slot * 0.4));
               const x = sx(r.t0) + (slot - bw) / 2, y = sy(r.hi), h = Math.max(8, sy(r.lo) - y);
               // A floating range has a data end at both ends: 4 px rounding at each, like every other bar.
-              g += `<rect data-bar="${r.t0}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${r.fc ? "var(--wx-muted)" : s.color}"${r.fc ? ' fill-opacity="0.5"' : ""}/>`;
+              g += `<rect data-bar="${r.t0}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" ${r.fc ? 'fill="none" stroke="var(--wx-muted)"' : `fill="${s.color}"`}/>`;
             }
           } else {
             const gapMs = spec.range === "hours" ? 16 * 60e3 : spec.range === "years" ? 70 * DAY : 1.5 * DAY;
@@ -2115,9 +2126,14 @@ tr.fc td { color: var(--wx-ink2); }
     _axis(spec, sx, padL, pw, markX) {
       const f = this._m.f, out = [];
       const put = (x, text, day, now) => out.push(`<text x="${x.toFixed(1)}" y="19" text-anchor="middle" class="tick${day ? " day" : ""}${now ? " now" : ""}">${esc(text)}</text>`);
-      // Night, once: a ribbon along the time axis instead of a shade in every well.
-      for (const [a, b] of spec.night ?? []) out.push(`<rect x="${sx(a).toFixed(1)}" y="2" width="${(sx(b) - sx(a)).toFixed(1)}" height="3" rx="1.5" fill="var(--wx-ink2)" fill-opacity="0.35"/>`);
-      if (spec.night?.length) out.push(`<text x="${(padL - 8).toFixed(1)}" y="9" text-anchor="end" class="tick">night</text>`);
+      // Daylight, once: a ribbon in the sun's colour along the time axis, and night is where it stops.
+      if (spec.night) {
+        const day = [];
+        let t = spec.x0;
+        for (const [a, b] of spec.night) { if (a > t) day.push([t, a]); t = Math.max(t, b); }
+        if (t < spec.x1) day.push([t, spec.x1]);
+        for (const [a, b] of day) out.push(`<rect x="${sx(a).toFixed(1)}" y="2" width="${(sx(b) - sx(a)).toFixed(1)}" height="3" rx="1.5" fill="var(--wx-sun)" fill-opacity="0.55"/>`);
+      }
       const clear = (x) => x >= padL + 14 && x <= padL + pw - 14 && (markX === null || Math.abs(x - markX) >= 34);
       if (spec.range === "hours") {
         const every = pw / ((spec.x1 - spec.x0) / HOUR) < 14 ? 12 : 6;
@@ -2360,9 +2376,8 @@ tr.fc td { color: var(--wx-ink2); }
       set("ws", f.num(W.v, 1), true);
       set("wfrom", W.card); set("wdeg", W.dir === null ? "" : `${f.num(W.dir)}°`);
       set("gustlull", W.gust === null ? "" : `Gusts ${f.num(W.gust, 1)}, lulls ${f.num(W.lull, 1)}${NB}${W.unit}`);
-      set("rosecap", W.roseSpan > 0
-        ? `Red arrow: blowing toward. Ring: last 10${NB}min. Petals: ${W.roseSpan > 23.5 * HOUR ? `last 24${NB}h` : `since ${f.time(m.now - W.roseSpan)}`}.`
-        : "Red arrow: blowing toward. Ring: last 10 min. Petals fill in as the wind is recorded.");
+      // The dial explains itself (its title says what each mark is); the one thing worth a line is a rose still filling in.
+      set("rosecap", W.roseSpan > 23.5 * HOUR ? "" : "Petals fill in over the first day.");
       const Sn = m.sun;
       set("daylen", Sn.rise && Sn.set ? `${f.dur(Sn.set - Sn.rise)} of daylight` : "");
       set("irr", f.num(Sn.irr), true);
