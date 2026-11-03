@@ -13,7 +13,7 @@ A Home Assistant dashboard card for WeatherFlow Tempest weather stations. It sho
 - **Now.** The temperature, a sentence that says what it means ("Mild and sticky, warming 1.3° an hour. Gentle breeze from the west-southwest…"), and six scales that place each reading on a recognised standard: today's range, dew point comfort, Beaufort force, the three-hour pressure tendency, UV index and rain intensity.
 - **Wind.** A dial with a needle that glides between the station's 3-second samples. The black or white wedge marks where the wind comes from, and the red arrow shows where it is going. A soft ring shows the last 10 minutes of direction, and petals show the last 24 hours.
 - **Sun.** Measured sunlight under the clear-sky curve for your location, so cloud reads as a bite out of the bell. It also shows today's energy, sunrise or sunset, and day length.
-- **Meteogram.** Temperature (with dew point and wet bulb), wind and gusts, pressure, humidity, sunshine, rain and lightning, stacked on one time axis and read through one crosshair. Hover or use the arrow keys to read any moment. Every range also has a table view, and the table downloads as CSV.
+- **Meteogram.** Temperature (with dew point and wet bulb), wind and gusts, pressure, humidity, sunshine, rain and lightning, stacked on one time axis and read through one crosshair. Hover, drag a finger across it, or use the arrow keys to read any moment. Every range also has a table view, and the table downloads as CSV.
 
 ![Days, months and years](images/ranges.png)
 
@@ -72,7 +72,8 @@ The card uses whatever units your entities report: °C or °F, km/h, m/s or mph,
 - **Honest charts.** Wind, rain and lightning start at zero, and humidity spans 0–100%. Pressure is the station's own reading (not reduced to sea level) and always spans at least 10 hPa, like a barograph, so a steady day looks steady.
 - **Privacy.** Everything runs in your browser against your own Home Assistant. The card makes no outside requests.
 - **Forecast credit.** When the forecast comes from Met.no, the card credits MET Norway beside the chart, as their data licence asks.
-- **Motion.** The needle and the recent-wind ring animate, unless the viewer's system asks for reduced motion.
+- **Motion.** The needle glides, a change of range crossfades, and a figure that changes crossfades in place; nothing ever moves the layout. All of it is off when the viewer's system asks for reduced motion.
+- **High contrast.** Under forced colours (Windows High Contrast, for one) the charts, the dial and the scales keep their own colours, since colour is what they say; everything else follows the system. A request for more contrast darkens the secondary text and the grid.
 
 Not affiliated with WeatherFlow-Tempest, Inc. Tempest is their trademark.
 

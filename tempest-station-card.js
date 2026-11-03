@@ -24,6 +24,11 @@
  *
  * Type follows Home Assistant's tokens: Roboto 400 and 500 at 64 (the one
  * hero figure; 48 on a short screen), 32 (headlines), 24, 16, 14 and 12 px.
+ * Figures are tabular.
+ *
+ * Motion: the needle glides between samples; a change of range, or of a
+ * figure, crossfades over 220 ms; nothing moves the layout. All of it is
+ * off under prefers-reduced-motion.
  *
  * Config:
  *   type: custom:tempest-station-card
@@ -36,7 +41,7 @@
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.2.0";
+  const VERSION = "1.3.0";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -353,6 +358,8 @@
   // The WeatherFlow integration names a station's entities sensor.st_<serial>_<measure>.
   const findStation = (states) => { const id = Object.keys(states).find((e) => /^sensor\.st_[0-9a-z]+_temperature$/.test(e)); return id ? id.slice(7, -12) : null; };
   const RANGE_KEY = "tempest-station-card:range";
+  const HINT_KEY = "tempest-station-card:hinted";
+  const CSV_BTN = `<button class="tbtn" data-csv title="Download these rows as CSV">CSV</button>`;
 
   const STYLE = `
 :host {
@@ -425,7 +432,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 
 /* The Now column: the reading, what it means, and the scales that place it. */
 .hero-row { display: flex; align-items: last baseline; gap: 20px; margin-top: 12px; }
-.hero { display: flex; align-items: flex-start; font-size: var(--wx-fs-hero); line-height: 1; letter-spacing: -0.02em; }
+.hero { display: flex; align-items: flex-start; font-size: var(--wx-fs-hero); line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .hero .u { font-size: var(--wx-fs-read); line-height: 24px; letter-spacing: 0; color: var(--wx-ink2); margin: 6px 0 0 4px; }
 .feels { color: var(--wx-ink2); }
 .feels b { color: var(--wx-ink); font-weight: var(--wx-w-medium); }
@@ -490,8 +497,17 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .dial .needle.calm { opacity: 0.35; }
 .dial [data-ring] { transition: stroke-opacity 3s linear; }
 @media print { .seg, .tbtn { display: none; } .card { break-inside: avoid; box-shadow: none; } }
+/* High contrast: the charts, the dial and the scales keep their own colours, since colour is what they say. */
+@media (forced-colors: active) {
+  .mg-p, .sunfig, .dial, .sc-track, .status i, .alert i, .tile .k, .mg-key i { forced-color-adjust: none; }
+  .sunfig, .dial { background: var(--wx-surface); border-radius: 8px; }
+  .seg button[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+@media (prefers-contrast: more) {
+  :host { --wx-ink2: color-mix(in srgb, var(--wx-ink) 82%, var(--wx-surface)); --wx-grid: color-mix(in srgb, var(--wx-ink) 22%, var(--wx-surface)); --wx-axis: color-mix(in srgb, var(--wx-ink) 40%, var(--wx-surface)); }
+}
 @media (prefers-reduced-motion: reduce) { .dial .needle, .dial [data-ring], .sc-mark { transition: none; } }
-.read { font-size: var(--wx-fs-read); line-height: 28px; white-space: nowrap; font-weight: var(--wx-w-medium); }
+.read { font-size: var(--wx-fs-read); line-height: 28px; white-space: nowrap; font-weight: var(--wx-w-medium); font-variant-numeric: tabular-nums; }
 .read .unit { font-weight: var(--wx-w-regular); }
 .cap { margin-top: 6px; line-height: 18px; }
 .sunfig svg { display: block; overflow: visible; }
@@ -499,6 +515,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .head-r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-left: auto; }
 .narrow .head-r { margin-left: 0; width: 100%; }
 .narrow [data-csv] { display: none; }
+.mg-body { position: relative; }
 .wide .mg-body { flex: 1 1 auto; min-height: 0; }
 .seg { display: inline-flex; border: 1px solid var(--wx-grid); border-radius: 6px; overflow: hidden; }
 .seg button, .tbtn { font: inherit; font-size: var(--wx-fs-small); line-height: 16px; color: var(--wx-ink2); background: none; border: 0; padding: 3px 10px; cursor: pointer; }
@@ -511,10 +528,13 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 /* Meteogram: one time axis for every measure. Each chart sits in its own well, led by a headline tile. */
 .mg { display: grid; grid-template-columns: var(--wx-tile, 184px) minmax(0, 1fr); position: relative; outline: none; }
 .mg:focus-visible { outline: 2px solid var(--primary-color, #2a78d6); outline-offset: 4px; border-radius: 4px; }
+/* A finger reads the chart as a mouse does: a drag along it scrubs; a drag up or down still scrolls the page. */
+.mg { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.mg-p, .mg-axis { touch-action: pan-y; }
 .tile { min-width: 0; overflow: hidden; padding: 4px 16px 0 0; }
 /* The squint test: the name and the number are the only dark, heavy things in a tile. */
 .tile .tn { font-size: var(--wx-fs-small); line-height: 16px; color: var(--wx-ink2); font-weight: var(--wx-w-regular); }
-.tile .tv { font-size: var(--wx-fs-stat); line-height: 36px; font-weight: var(--wx-w-medium); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; }
+.tile .tv { font-size: var(--wx-fs-stat); line-height: 36px; font-weight: var(--wx-w-medium); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
 .tile .tv .unit { font-size: var(--wx-fs-body); font-weight: var(--wx-w-regular); letter-spacing: 0; line-height: 1; }
 .tile .tl, .tile .tn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile .tl { min-height: 18px; line-height: 18px; }
@@ -525,6 +545,16 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 @keyframes wx-arrive { from { opacity: 0; } to { opacity: 1; } }
 .arrive .mg-p svg, .arrive .sunfig svg, .arrive .dial svg, .arrive .tile .tv { animation: wx-arrive 360ms ease-out both; }
 @media (prefers-reduced-motion: reduce) { .arrive .mg-p svg, .arrive .sunfig svg, .arrive .dial svg, .arrive .tile .tv { animation: none; } }
+/* A change of range, or of the history behind the chart, is a crossfade: the old chart fades out over the new one. */
+.mg-ghost { position: absolute; inset: 0; overflow: hidden; pointer-events: none; animation: wx-fade 220ms ease-out both; }
+.mg-ghost * { animation: none !important; }
+.swap > .mg, .swap > .table-wrap { animation: wx-arrive 220ms ease-out both; }
+@keyframes wx-fade { to { opacity: 0; } }
+/* A figure that changes crossfades too: the new digits darken while the old, held in a ghost, fade. */
+.xf { position: relative; animation: wx-ink 220ms ease-out both; }
+.xf::after { content: attr(data-old); position: absolute; left: 0; top: 0; color: var(--wx-ink); white-space: nowrap; pointer-events: none; animation: wx-fade 220ms ease-out both; }
+@keyframes wx-ink { from { color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .mg-ghost { display: none; } .swap > .mg, .swap > .table-wrap, .xf { animation: none; } .xf::after { content: none; } }
 .mg-p svg, .mg-axis svg { display: block; overflow: visible; }
 .mg-axis { grid-column: 2; }
 .mg-key { grid-column: 1; padding: 6px 16px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -545,6 +575,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .tick.halo { paint-order: stroke; stroke: var(--wx-well); stroke-width: 4px; stroke-linejoin: round; }
 .tick.day { fill: var(--wx-ink); }
 .tick.now { font-weight: var(--wx-w-medium); }
+.tick.hint { fill: var(--wx-ink2); }
 .yearlabel { font-size: var(--wx-fs-small); font-weight: var(--wx-w-medium); fill: var(--wx-ink); font-variant-numeric: tabular-nums;
   paint-order: stroke; stroke: var(--wx-surface); stroke-width: 4px; stroke-linejoin: round; }
 .table-wrap { overflow: auto; border-top: 1px solid var(--wx-grid); }
@@ -721,7 +752,7 @@ tr.fc td { color: var(--wx-ink2); }
       } catch (e) {
         this._error = e?.message ?? String(e);
       }
-      this._renderAll();
+      this._renderAll(true);
     }
 
     _subscribeForecast() {
@@ -954,13 +985,14 @@ tr.fc td { color: var(--wx-ink2); }
       this._root.addEventListener("click", (e) => {
         const range = e.target.closest?.("[data-range]");
         if (range) {
+          if (range.dataset.range === this._range) return;
           this._range = range.dataset.range;
           try { window.localStorage.setItem(`${RANGE_KEY}:${this._config.station ?? ""}`, this._range); } catch (err) { /* not remembered */ }
           this._mgT = null;
-          this._renderAll();
+          this._swapMeteogram();
           return;
         }
-        if (e.target.closest?.("[data-table]")) { this._table = !this._table; this._renderAll(); }
+        if (e.target.closest?.("[data-table]")) { this._table = !this._table; this._swapMeteogram(); }
         if (e.target.closest?.("[data-csv]")) this._downloadCsv();
       });
       const away = () => { if (this._mgHold === "pointer") { this._mgHold = null; this._mgShow(null); } };
@@ -995,12 +1027,13 @@ tr.fc td { color: var(--wx-ink2); }
       else { clearTimeout(this._rz); this._rz = setTimeout(() => this._drawCharts(), 60); }
     }
 
-    _renderAll() {
+    _renderAll(fade = false) {
       if (!this._mounted || !this._ents) return;
       const m = this._model();
       this._m = m;
       this._bandsKey = this._keyOf(m);
       this._mgFocus = this._mgFocus || !!this._root.activeElement?.classList?.contains("mg");
+      const ghost = fade ? this._ghost(this._root.querySelector("[data-mg]")) : null;
       this._redrawing = true;
       this._body.innerHTML = this._nowCol(m) + this._timeCol(m);
       this._redrawing = false;
@@ -1010,11 +1043,71 @@ tr.fc td { color: var(--wx-ink2); }
       if (this._mode === "wide" && col && col.scrollHeight > col.clientHeight) { this._body.classList.add("dense"); this._reserveLede(); }
       this._needleAngle = undefined;
       this._drawCharts();
+      this._settle(this._root.querySelector("[data-mg]"), ghost);
       this._applyLive(m);
       this._ensureLong(this._range);
     }
 
     _drawCharts() { this._fitDial(); this._drawSun(); this._drawMeteogram(); }
+
+    // A new range, or the table: only the chart changes, and it crossfades. The rest of the page, and the button
+    // that was pressed, are left alone.
+    _swapMeteogram() {
+      const host = this._root?.querySelector("[data-mg]");
+      if (!host || !this._m) { this._renderAll(); return; }
+      this._syncControls();
+      const ghost = this._ghost(host);
+      this._drawMeteogram();
+      this._settle(host, ghost);
+      this._ensureLong(this._range);
+    }
+
+    _syncControls() {
+      const ctl = this._root.querySelector(".head-r");
+      if (!ctl) return;
+      ctl.querySelectorAll("[data-range]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.range === this._range)));
+      const tb = ctl.querySelector("[data-table]"), csv = ctl.querySelector("[data-csv]");
+      if (tb) { tb.setAttribute("aria-pressed", String(!!this._table)); tb.textContent = this._table ? "Chart" : "Table"; }
+      if (this._table && !csv) tb?.insertAdjacentHTML("afterend", CSV_BTN);
+      else if (!this._table && csv) csv.remove();
+    }
+
+    _motion() { return !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches; }
+
+    // The chart about to be replaced, lifted out of its host so it can fade over the new one.
+    _ghost(host) {
+      if (!host?.firstElementChild || !this._motion()) return null;
+      host.querySelector(":scope > .mg-ghost")?.remove();
+      const g = document.createElement("div");
+      g.className = "mg-ghost";
+      g.setAttribute("aria-hidden", "true");
+      g.inert = true;
+      g.append(...host.childNodes);
+      g.querySelectorAll("[tabindex]").forEach((el) => el.removeAttribute("tabindex"));
+      return g;
+    }
+
+    _settle(host, ghost) {
+      if (!host || !ghost) return;
+      host.appendChild(ghost);
+      host.classList.add("swap");
+      clearTimeout(this._swapT);
+      this._swapT = setTimeout(() => { ghost.remove(); host.classList.remove("swap"); }, 300);
+    }
+
+    // A figure that changes crossfades: the old digits stay in a ghost that fades as the new ones darken.
+    _swapText(el, text) {
+      if (!el || el.textContent === text) return;
+      const old = el.textContent;
+      el.textContent = text;
+      if (!old || !this._motion()) return;
+      el.dataset.old = old;
+      el.classList.remove("xf");
+      void el.offsetWidth;
+      el.classList.add("xf");
+      clearTimeout(el._xf);
+      el._xf = setTimeout(() => { el.classList.remove("xf"); delete el.dataset.old; }, 260);
+    }
 
     // The sentence's box is always as tall as the longest sentence the card can write at this width, so a change of
     // wording, however large, never moves what sits below it.
@@ -1218,7 +1311,7 @@ tr.fc td { color: var(--wx-ink2); }
         <div class="hist"><div class="head mg-head"><h2 data-k="mgtitle"></h2>
           <div class="head-r">
             <span class="seg" role="group" aria-label="Time range">${RANGES.map((r) => `<button data-range="${r}" aria-pressed="${this._range === r}">${r[0].toUpperCase()}${r.slice(1)}</button>`).join("")}</span>
-            <button class="tbtn" data-table aria-pressed="${!!this._table}">${this._table ? "Chart" : "Table"}</button>${this._table ? `<button class="tbtn" data-csv title="Download these rows as CSV">CSV</button>` : ""}</div></div>
+            <button class="tbtn" data-table aria-pressed="${!!this._table}">${this._table ? "Chart" : "Table"}</button>${this._table ? CSV_BTN : ""}</div></div>
         <div class="mg-body" data-mg></div></div></section>`;
     }
 
@@ -1809,7 +1902,7 @@ tr.fc td { color: var(--wx-ink2); }
         this._long[range] = { data: {}, at: Date.now(), error: e?.message ?? String(e) };
       }
       this._longPending[range] = false;
-      if (this._range === range) this._renderAll();
+      if (this._range === range) this._renderAll(true);
     }
 
     // Strip heights: in the one-screen layout they share the body's height by weight; otherwise their natural size.
@@ -1857,7 +1950,7 @@ tr.fc td { color: var(--wx-ink2); }
       const spec = this._spec(m);
       this._mgSpec = spec;
       const title = this._root.querySelector('[data-k="mgtitle"]');
-      if (title) title.textContent = spec.title;
+      if (title) this._swapText(title, spec.title);
       this._mgFocus = this._mgFocus || !!this._root.activeElement?.classList?.contains("mg");
       if (this._table) { this._mgFocus = false; this._mgHold = null; this._redrawing = true; host.innerHTML = this._tableHtml(spec); this._redrawing = false; return; }
       const narrow = this._mode === "narrow", wide = this._mode === "wide";
@@ -2082,7 +2175,7 @@ tr.fc td { color: var(--wx-ink2); }
         const tv = this._root.querySelector(`[data-tv="${s.key}"]`), tu = this._root.querySelector(`[data-tu="${s.key}"]`);
         const tq = this._root.querySelector(`[data-tq="${s.key}"]`);
         if (tq) tq.style.visibility = t === null ? "" : "hidden";
-        if (tv && tv.textContent !== v.value) tv.textContent = v.value;
+        if (tv) { if (t === null) this._swapText(tv, v.value); else if (tv.textContent !== v.value) tv.textContent = v.value; }
         if (tu) { const u = v.unit ?? ""; if (tu.textContent !== u) tu.textContent = u; tu.classList.toggle("pct", u === "%"); }
         // Caption first, then companion lines, into however many lines the tile has.
         const slots = this._root.querySelectorAll(`[data-tl^="${s.key}-"]`);
@@ -2119,27 +2212,56 @@ tr.fc td { color: var(--wx-ink2); }
           }).join("");
         }
       });
-      // The time under the crosshair sits on the axis below it, out of the layout, so a reading never moves anything.
-      const xt = this._root.querySelector("[data-xt]");
-      const labels = xt ? xt.ownerSVGElement.querySelectorAll(":scope > text") : [];
-      if (xt && t === null) { xt.setAttribute("visibility", "hidden"); labels.forEach((lab) => { lab.style.visibility = ""; }); }
-      else if (xt) {
-        const txt = xt.querySelector("[data-xtt]"), bg = xt.querySelector("[data-xtb]"), tick = xt.querySelector("[data-xtl]");
-        const label = spec.when(t), x = G.sx(t), right = Number(xt.ownerSVGElement.getAttribute("width"));
-        if (txt.textContent !== label) txt.textContent = label;
-        const w = txt.getComputedTextLength() + 16, cx = Math.max(w / 2, Math.min(right - w / 2, x));
-        txt.setAttribute("x", cx.toFixed(1));
-        bg.setAttribute("x", (cx - w / 2).toFixed(1));
-        bg.setAttribute("width", w.toFixed(1));
-        tick.setAttribute("x1", x.toFixed(1));
-        tick.setAttribute("x2", x.toFixed(1));
-        xt.setAttribute("visibility", label ? "visible" : "hidden");
-        // An axis label the chip touches steps aside whole, rather than peeking out from under it.
-        const lo = cx - w / 2 - 4, hi = cx + w / 2 + 4;
-        labels.forEach((lab) => { const b = lab.getBBox(); lab.style.visibility = label && b.x < hi && b.x + b.width > lo ? "hidden" : ""; });
+      if (t === null) { if (this._hinted) this._chip(null); else this._mgHint(); }
+      else {
+        if (!this._hinted) { this._hinted = true; try { window.localStorage.setItem(HINT_KEY, "9"); } catch (e) { /* not remembered */ } }
+        this._chip(spec.when(t), G.sx(t));
       }
       this._mgT = t;
       this._mgRange = spec.range;
+    }
+
+    // The chip on the axis: the time under the crosshair or, before the first reading, how to get one. It sits in
+    // the axis, out of the layout, so a reading never moves anything; an axis label it touches steps aside whole.
+    _chip(label, x, hint = false) {
+      const xt = this._root.querySelector("[data-xt]");
+      if (!xt) return;
+      const labels = xt.ownerSVGElement.querySelectorAll(":scope > text");
+      if (!label) { xt.setAttribute("visibility", "hidden"); labels.forEach((lab) => { lab.style.visibility = ""; }); return; }
+      const txt = xt.querySelector("[data-xtt]"), bg = xt.querySelector("[data-xtb]"), tick = xt.querySelector("[data-xtl]");
+      const right = Number(xt.ownerSVGElement.getAttribute("width"));
+      if (txt.textContent !== label) txt.textContent = label;
+      txt.setAttribute("class", hint ? "tick hint" : "tick day now");
+      const w = txt.getComputedTextLength() + 16, cx = Math.max(w / 2, Math.min(right - w / 2, x));
+      txt.setAttribute("x", cx.toFixed(1));
+      bg.setAttribute("x", (cx - w / 2).toFixed(1));
+      bg.setAttribute("width", w.toFixed(1));
+      tick.setAttribute("x1", x.toFixed(1));
+      tick.setAttribute("x2", x.toFixed(1));
+      tick.setAttribute("visibility", hint ? "hidden" : "visible");
+      xt.setAttribute("visibility", "visible");
+      const lo = cx - w / 2 - 4, hi = cx + w / 2 + 4;
+      labels.forEach((lab) => { const b = lab.getBBox(); lab.style.visibility = b.x < hi && b.x + b.width > lo ? "hidden" : ""; });
+    }
+
+    // Until the first reading, the chip says how to get one, in the widest gap between the axis labels, on a
+    // browser's first three visits. A reading retires it for good.
+    _mgHint() {
+      if (this._hinted) return;
+      let n = 0;
+      try { n = Number(window.localStorage.getItem(HINT_KEY)) || 0; } catch (e) { n = 0; }
+      if (n >= 3) { this._hinted = true; this._chip(null); return; }
+      if (!this._hintCounted) { this._hintCounted = true; try { window.localStorage.setItem(HINT_KEY, String(n + 1)); } catch (e) { /* not remembered */ } }
+      const G = this._mgGeom, xt = this._root.querySelector("[data-xt]");
+      if (!G || !xt) return;
+      const boxes = [...xt.ownerSVGElement.querySelectorAll(":scope > text")].map((l) => l.getBBox()).sort((a, b) => a.x - b.x);
+      let best = { gap: -1, x: G.padL + G.pw / 2 }, prev = G.padL;
+      for (const b of [...boxes, { x: G.padL + G.pw, width: 0 }]) {
+        if (b.x - prev > best.gap) best = { gap: b.x - prev, x: (prev + b.x) / 2 };
+        prev = Math.max(prev, b.x + b.width);
+      }
+      const touch = !!window.matchMedia?.("(hover: none)")?.matches;
+      this._chip(touch ? "Drag to read" : "Hover or ← → to read", best.x, true);
     }
 
     _bindMeteogram() {
@@ -2148,18 +2270,34 @@ tr.fc td { color: var(--wx-ink2); }
       if (!mg || !G) return;
       const spec = G.spec;
       const clampT = (t) => Math.max(spec.x0, Math.min(spec.x1 - 1, t));
+      // Every plot shares one x origin, so a captured finger is read against the first plot wherever it has gone.
       const fromEvent = (e) => {
-        const svg = e.target.closest?.(".mg-p svg, .mg-axis svg");
+        const svg = e.target.closest?.(".mg-p svg, .mg-axis svg") ?? (this._mgTouch === e.pointerId ? mg.querySelector(".mg-p svg, .mg-axis svg") : null);
         if (!svg) return null;
         const r = svg.getBoundingClientRect();
         const x = e.clientX - r.left;
         if (x < G.padL || x > G.padL + G.pw) return null;
         return spec.snap(clampT(spec.x0 + ((x - G.padL) / G.pw) * (spec.x1 - spec.x0)));
       };
-      mg.addEventListener("pointermove", (e) => { const t = fromEvent(e); if (t !== null) { this._mgHold = "pointer"; this._mgShow(t); } });
+      const scrub = (e) => { const t = fromEvent(e); if (t !== null) { this._mgHold = "pointer"; this._mgShow(t); } };
+      // A mouse reads by hovering. A finger or a pen reads by touching and dragging, captured so the reading follows
+      // it off the plot, and let go when it lifts.
+      mg.addEventListener("pointerdown", (e) => {
+        if (e.pointerType === "mouse" || !e.isPrimary) return;
+        const t = fromEvent(e);
+        if (t === null) return;
+        this._mgTouch = e.pointerId;
+        try { mg.setPointerCapture(e.pointerId); } catch (err) { /* already lifted */ }
+        this._mgHold = "pointer";
+        this._mgShow(t);
+      });
+      mg.addEventListener("pointermove", (e) => { if (e.pointerType === "touch" && this._mgTouch !== e.pointerId) return; scrub(e); });
       // A chart removed by a redraw is not the reader leaving it.
-      const release = () => { if (mg.isConnected && !this._redrawing) { this._mgHold = null; this._mgShow(null); } };
+      const release = () => { this._mgTouch = null; if (mg.isConnected && !this._redrawing) { this._mgHold = null; this._mgShow(null); } };
       mg.addEventListener("pointerleave", release);
+      mg.addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") release(); });
+      mg.addEventListener("pointercancel", release);
+      mg.addEventListener("contextmenu", (e) => { if (this._mgTouch !== null && this._mgTouch !== undefined) e.preventDefault(); });
       mg.addEventListener("blur", release);
       mg.addEventListener("keydown", (e) => {
         const step = e.shiftKey ? spec.bigStep : spec.step;
@@ -2200,7 +2338,8 @@ tr.fc td { color: var(--wx-ink2); }
       if (this._keyOf(m) !== this._bandsKey) { this._renderNow(m); return; }
       this._m = m;
       const f = m.f;
-      const set = (k, v) => this._root.querySelectorAll(`[data-k="${k}"]`).forEach((el) => { if (el.textContent !== v) el.textContent = v; });
+      // The large figures crossfade when they change; the rest is set in place.
+      const set = (k, v, fade = false) => this._root.querySelectorAll(`[data-k="${k}"]`).forEach((el) => { if (fade) this._swapText(el, v); else if (el.textContent !== v) el.textContent = v; });
       const T = m.temp, W = m.wind, St = m.station;
 
       set("clock", `${f.weekday(m.now)}, ${f.date(m.now)} · ${f.time(m.now)}`);
@@ -2210,11 +2349,11 @@ tr.fc td { color: var(--wx-ink2); }
       this._root.querySelectorAll('[data-k="live-cls"]').forEach((el) => { el.className = `status ${fresh ? "good" : "warn"}`; el.title = this._stationNote(m); });
       const al = this._root.querySelector('[data-k="alerts"]');
       if (al) { const html = this._alerts(m); if (al.innerHTML !== html) al.innerHTML = html; }
-      set("t", f.num(T.v, 1));
-      set("feels", `${f.num(T.feels, 1)}°`);
+      set("t", f.num(T.v, 1), true);
+      set("feels", `${f.num(T.feels, 1)}°`, true);
       set("lede", m.lede);
       this._reserveLede();
-      set("ws", f.num(W.v, 1));
+      set("ws", f.num(W.v, 1), true);
       set("wfrom", W.card); set("wdeg", W.dir === null ? "" : `${f.num(W.dir)}°`);
       set("gustlull", W.gust === null ? "" : `Gusts ${f.num(W.gust, 1)}, lulls ${f.num(W.lull, 1)}${NB}${W.unit}`);
       set("rosecap", W.roseSpan > 0
@@ -2222,7 +2361,7 @@ tr.fc td { color: var(--wx-ink2); }
         : "Red arrow: blowing toward. Ring: last 10 min. Petals fill in as the wind is recorded.");
       const Sn = m.sun;
       set("daylen", Sn.rise && Sn.set ? `${f.dur(Sn.set - Sn.rise)} of daylight` : "");
-      set("irr", f.num(Sn.irr));
+      set("irr", f.num(Sn.irr), true);
       // By the sun's height: civil twilight is dawn or dusk, the first six degrees are golden hour, above ten the sky's clarity.
       const pm = f.parts(m.now).hour >= 12;
       set("sunline1", Sn.el > 10 && Sn.pct !== null ? `${f.num(Math.min(Sn.pct, 1.5) * 100)}% of a clear sky` : Sn.el > 6 ? "" : Sn.el > 0 ? "Golden hour" : Sn.el > -6 ? (pm ? "Dusk" : "Dawn") : "");
@@ -2234,7 +2373,7 @@ tr.fc td { color: var(--wx-ink2); }
       if (m.moist.comfort) { set("comfort-v", m.moist.comfort.word); set("comfort-n", `${f.num(m.moist.dew, 1)}°`); }
       if (m.sun.uvs) { set("uv-v", m.sun.uvs.word); set("uv-n", f.num(m.sun.uv, 1)); }
       if (m.rain.rs) set("rate-n", `${f.num(m.rain.rate, m.rain.unit === "in" ? 2 : 1)}${NB}${m.rain.rateUnit}`);
-      if (T.lo && T.hi) set("today-v", `${span2(f.num(T.lo.v, 1), f.num(T.hi.v, 1))}°`);
+      if (T.lo && T.hi) set("today-v", `${span2(f.num(T.lo.v, 1), f.num(T.hi.v, 1))}°`, true);
       if (this._mgT === null || this._mgT === undefined) this._mgShow(null);
 
       // Marks move without a re-render while the reading stays in its band.

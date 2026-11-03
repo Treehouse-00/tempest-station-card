@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+- **A change of range crossfades.** Hours to Days, or chart to table, fades the old chart out over the new one in a fifth of a second; the rest of the page, and the button that was pressed, are left where they are. A refresh of the history crossfades the same way.
+- **A finger reads the chart.** On a phone or tablet, touch a plot and drag: the crosshair and the readings follow the finger, across every strip, and let go when it lifts. A drag up or down still scrolls the page.
+- **Figures that change crossfade**, in tabular digits, so the temperature, the headlines and the wind and sun readings never jump or nudge their units.
+- **A first-visit hint.** Until the first reading, the chip on the axis says "Hover or ← → to read" (or "Drag to read" on a touch screen), in the widest gap between the labels, on a browser's first three visits; a reading retires it for good.
+- **High contrast.** Under forced colours the charts, the dial and the scales keep their own colours; a request for more contrast darkens the secondary text and the grid.
+
 ## 1.2.0
 
 - **The sentence speaks like a person.** "Cool, dry and still tonight" instead of "Cool and dry tonight. Calm."; it stops calling the air dry while it rains; and it no longer reports a steady pressure, only one that is moving.
