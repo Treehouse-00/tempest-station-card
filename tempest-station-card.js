@@ -23,21 +23,20 @@
  *   clear-sky irradiance      Haurwitz (1945) model
  *
  * Type follows Home Assistant's tokens: Roboto 400 and 500 at 64 (the one
- * hero figure), 32 (headlines), 24, 16, 14 and 12 px.
+ * hero figure; 48 on a short screen), 32 (headlines), 24, 16, 14 and 12 px.
  *
  * Config:
  *   type: custom:tempest-station-card
  *   station: st_00012345          # entity slug; auto-detected when omitted
  *   forecast: weather.forecast_home
  *   name: Backyard                # optional place name; heads the Now column in place of "Now"
- *   elevation: 45                 # metres, for sea-level pressure (else HA's)
  *   range: days                   # hours | days | months | years; the viewer's last choice wins
  *   entities: { temperature: sensor.x }   # per-key overrides
  */
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.0.0";
+  const VERSION = "1.1.0";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -46,6 +45,8 @@
   // A pressure span given in hPa, in the barometer's own unit. A barograph's scale is fixed for a reason: zoomed
   // to fit, a steady day draws as a fall, so each range keeps at least a weather-sized span.
   const hpaIn = (hpa, unit) => hpa / (HPA[unit] ?? 1);
+  // Decimals that give a pressure unit about 0.1 hPa of resolution: 1007.9 hPa, 29.76 inHg, 101.32 kPa.
+  const presDp = (unit) => ((HPA[unit] ?? 1) >= 10 ? 2 : 1);
   const MS = { "m/s": 1, "km/h": 1 / 3.6, mph: 0.44704, kn: 0.514444, "ft/s": 0.3048 };
   const MM = { mm: 1, cm: 10, in: 25.4, "mm/h": 1, "in/h": 25.4 };
   const KM = { km: 1, m: 0.001, mi: 1.609344, ft: 0.0003048, yd: 0.0009144 };
@@ -70,16 +71,16 @@
 
   const CARD16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
   // In running text the points are words: figures say SW, sentences say southwest.
-  const RING = 72;
   const CARD16_WORDS = ["north", "north-northeast", "northeast", "east-northeast", "east", "east-southeast", "southeast", "south-southeast",
     "south", "south-southwest", "southwest", "west-southwest", "west", "west-northwest", "northwest", "north-northwest"].map((w) => w.replace("-", "\u2011"));
   const DEPTH_WORDS = { in: ["inch", "inches"], mm: ["millimeter", "millimeters"] };
+  const RING = 72; // segments in the dial's recent-wind ring, 5° each
   const norm360 = (d) => ((d % 360) + 360) % 360;
   const sector16 = (deg) => Math.round(norm360(deg) / 22.5) % 16;
 
   // Met Office: pressure change over the preceding 3 h, in hPa. Nine bands, steady in the middle.
   // The bands stay in hPa; the change is shown in the unit the barometer reads in.
-  const PRESSURE_WORDS = { hPa: "hectopascals", mbar: "millibars", mb: "millibars", kPa: "kilopascals", inHg: "inches of mercury", mmHg: "millimetres of mercury" };
+  const PRESSURE_WORDS = { hPa: "hectopascals", mbar: "millibars", mb: "millibars", kPa: "kilopascals", inHg: "inches of mercury", mmHg: "millimeters of mercury" };
   // A change past "steady" never prints as zero: inHg gains a third decimal below 0.01.
   const tendIn = (f, dHpa, pu) => {
     const k = HPA[pu] ? HPA[pu] : 1, unit = HPA[pu] ? pu : "hPa", v = dHpa / k;
@@ -134,10 +135,10 @@
     { v: 2.39, label: "power save 2", detail: "wind every minute" },
     { v: 2.355, label: "power save 3", detail: "wind every 5 min, rain off" },
   ];
-  const powerMode = (v) => (v >= 2.455 ? 0 : v > 2.415 ? 0.5 : v > 2.39 ? 1 : v > 2.355 ? 2 : 3);
+  // The mode a battery voltage puts the station in; between full rate and the first save it may be either (0.5).
+  const powerMode = (v) => (v >= POWER[0].v ? 0 : v > POWER[1].v ? 0.5 : v > POWER[2].v ? 1 : v > POWER[3].v ? 2 : 3);
 
   const STRIKE_MI = 10; // NWS striking distance
-  const DETECT_MI = 25; // Tempest lightning detection range (40 km)
 
   // The longest sentence the Now column can write, every clause in its longest words: the sentence's box is always this
   // tall at the current width, so no change of wording, however big, can move what sits below it.
@@ -200,9 +201,14 @@
 
   class Fmt {
     // clock: Home Assistant's time format, "12" or "24" to override the language's own clock.
-    constructor(lang, tz, clock) {
+    // numbers: Home Assistant's number format, "language" or an explicit style.
+    constructor(lang, tz, clock, numbers) {
       this.lang = lang || "en";
       this.tz = tz;
+      this.clock = clock;
+      this.numbers = numbers;
+      this._numLang = { comma_decimal: "en-US", decimal_comma: "de-DE", space_comma: "fr-FR", none: "en-US" }[numbers] ?? this.lang;
+      this._numOpts = numbers === "none" ? { useGrouping: false } : { useGrouping: "min2" };
       this._nf = new Map();
       const o = { timeZone: tz }, h = clock === "12" ? { hour12: true } : clock === "24" ? { hourCycle: "h23" } : {};
       this._time = new Intl.DateTimeFormat(this.lang, { ...o, ...h, hour: "numeric", minute: "2-digit" });
@@ -215,14 +221,16 @@
     num(v, dp = 0) {
       if (v === null || v === undefined || !Number.isFinite(v)) return "—";
       let f = this._nf.get(dp);
-      if (!f) this._nf.set(dp, (f = new Intl.NumberFormat(this.lang, { minimumFractionDigits: dp, maximumFractionDigits: dp, useGrouping: "min2" })));
+      if (!f) this._nf.set(dp, (f = new Intl.NumberFormat(this._numLang, { minimumFractionDigits: dp, maximumFractionDigits: dp, ...this._numOpts })));
       return f.format(v).replace("-", MINUS);
     }
     signed(v, dp = 0) {
       if (!Number.isFinite(v)) return "—";
       const s = this.num(Math.abs(v), dp);
-      return Number(s.replace(/[^\d]/g, "")) === 0 ? s : (v > 0 ? "+" : MINUS) + s;
+      return Math.abs(v) < 0.5 * 10 ** -dp ? s : (v > 0 ? "+" : MINUS) + s;
     }
+    // The start of the local hour holding t, in any time zone, including the :30 and :45 ones.
+    startOfHour(t) { const p = this.parts(t); return t - p.minute * 60e3 - p.second * 1000 - (t % 1000); }
     time(t) { return this._time.format(t); }
     hour(t) { return this._hour.format(t); }
     weekday(t) { return this._wd.format(t); }
@@ -319,7 +327,6 @@
     const keep = new Set(all.map((_, i) => i).sort((a, b) => rank(all[a]) - rank(all[b]) || a - b).slice(0, n));
     return all.filter((_, i) => keep.has(i));
   };
-  const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
   const span2 = (a, b) => (a === b ? a : `${a}–${b}`);
   // The highest (sign 1) or lowest (sign -1) point in a series.
   const extreme = (pts, sign) => pts.reduce((a, p) => (!a || sign * (p.v - a.v) > 0 ? p : a), null);
@@ -330,11 +337,11 @@
   const KEYS = ["temperature", "feels_like", "dew_point", "humidity", "air_pressure", "wind_speed", "wind_direction",
     "wind_speed_average", "wind_direction_average", "wind_gust", "wind_lull", "irradiance", "illuminance", "uv_index",
     "precipitation", "precipitation_intensity", "precipitation_type", "lightning_count", "lightning_last_distance",
-    "lightning_last_strike", "lightning_average_distance", "battery_voltage", "wet_bulb_temperature", "vapor_pressure", "air_density"];
+    "lightning_last_strike", "battery_voltage", "wet_bulb_temperature", "vapor_pressure", "air_density"];
   const STAT_KEYS = ["temperature", "feels_like", "dew_point", "wet_bulb_temperature", "humidity", "vapor_pressure", "air_pressure",
     "air_density", "wind_speed", "wind_direction", "wind_speed_average", "wind_gust", "wind_lull", "irradiance", "illuminance",
     "uv_index", "precipitation", "precipitation_intensity", "lightning_count", "battery_voltage"];
-  const DAILY_KEYS = ["temperature", "wind_speed_average", "wind_gust", "wind_lull", "air_pressure", "humidity",
+  const LONG_KEYS = ["temperature", "wind_speed_average", "wind_gust", "wind_lull", "air_pressure", "humidity",
     "irradiance", "precipitation", "lightning_count"];
   const FIVE_MIN = 300e3;
   const HOUR = 3600e3;
@@ -343,13 +350,15 @@
   const PAST = 24 * HOUR, AHEAD = 12 * HOUR;
   const PAST_DAYS = 14, AHEAD_DAYS = 5;
   const RANGES = ["hours", "days", "months", "years"];
+  // The WeatherFlow integration names a station's entities sensor.st_<serial>_<measure>.
+  const findStation = (states) => { const id = Object.keys(states).find((e) => /^sensor\.st_[0-9a-z]+_temperature$/.test(e)); return id ? id.slice(7, -12) : null; };
   const RANGE_KEY = "tempest-station-card:range";
 
   const STYLE = `
 :host {
   display: block;
   --wx-temp: #eb6834; --wx-dew: #1baf7a; --wx-rain: #2a78d6; --wx-sun: #eda100;
-  --wx-temp-2: #c44513; --wx-dew-2: #14835c; --wx-downwind: #d03b3b; --wx-wetbulb: #a68600;
+  --wx-temp-2: #c44513; --wx-downwind: #d03b3b; --wx-wetbulb: #a68600;
   --wx-wind: #008300; --wx-pres: #6250d6; --wx-bolt: #e87ba4; --wx-muted: #898781;
   --wx-grid: #e1e0d9; --wx-axis: #c3c2b7; --wx-wash: rgba(11,11,11,0.035);
   --wx-good: #0ca30c; --wx-warn: #fab219; --wx-critical: #d03b3b;
@@ -375,7 +384,7 @@
 :host(.dark) {
   --wx-temp: #d95926; --wx-dew: #199e70; --wx-rain: #3987e5; --wx-sun: #c98500;
   --wx-pres: #9085e9; --wx-bolt: #d55181;
-  --wx-temp-2: #e2825c; --wx-dew-2: #1fc68c; --wx-downwind: #f06a5f; --wx-wind: #00a400; --wx-wetbulb: #f2d23b;
+  --wx-temp-2: #e2825c; --wx-downwind: #f06a5f; --wx-wind: #00a400; --wx-wetbulb: #f2d23b;
   --wx-grid: #34342f; --wx-axis: #4a4a43; --wx-wash: rgba(255,255,255,0.045);
 }
 * { box-sizing: border-box; }
@@ -425,8 +434,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .tight .hero-row { margin-top: 8px; }
 .tight .hero { font-size: 48px; }
 .tight .hero .u { margin-top: 3px; }
-.tight .lede { font-size: var(--wx-fs-body); line-height: 20px; margin-top: 8px; min-height: 60px; }
-.tight .scales { margin-top: 12px; gap: 2px; }
+.tight .lede { font-size: var(--wx-fs-body); line-height: 20px; min-height: 60px; }
 .tight .top { padding-bottom: 12px; }
 .tight .body { padding-top: 12px; }
 .tight .sc-track { margin-top: 6px; }
@@ -478,19 +486,19 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .narrow .inst.sun .sunfig { width: 100%; }
 .narrow .inst.sun .txt { width: auto; }
 .dial { flex: none; position: relative; }
-.dial .needle { transition: transform 3s cubic-bezier(.45,.05,.55,.95); }
+.dial .needle { transition: transform 3s cubic-bezier(.45,.05,.55,.95), opacity 1s; }
+.dial .needle.calm { opacity: 0.35; }
 .dial [data-ring] { transition: stroke-opacity 3s linear; }
+@media print { .seg, .tbtn { display: none; } .card { break-inside: avoid; box-shadow: none; } }
 @media (prefers-reduced-motion: reduce) { .dial .needle, .dial [data-ring], .sc-mark { transition: none; } }
 .read { font-size: var(--wx-fs-read); line-height: 28px; white-space: nowrap; font-weight: var(--wx-w-medium); }
 .read .unit { font-weight: var(--wx-w-regular); }
-.reads { display: grid; gap: 4px; min-width: 0; }
-.reads .read { margin-bottom: 2px; }
-.reads b { font-weight: var(--wx-w-regular); }
 .cap { margin-top: 6px; line-height: 18px; }
 .sunfig svg { display: block; overflow: visible; }
 .mg-head { margin-bottom: 12px; }
 .head-r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-left: auto; }
 .narrow .head-r { margin-left: 0; width: 100%; }
+.narrow [data-csv] { display: none; }
 .wide .mg-body { flex: 1 1 auto; min-height: 0; }
 .seg { display: inline-flex; border: 1px solid var(--wx-grid); border-radius: 6px; overflow: hidden; }
 .seg button, .tbtn { font: inherit; font-size: var(--wx-fs-small); line-height: 16px; color: var(--wx-ink2); background: none; border: 0; padding: 3px 10px; cursor: pointer; }
@@ -534,7 +542,7 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .tick.halo { paint-order: stroke; stroke: var(--wx-well); stroke-width: 4px; stroke-linejoin: round; }
 .tick.day { fill: var(--wx-ink); }
 .tick.now { font-weight: var(--wx-w-medium); }
-.ext { font-size: var(--wx-fs-small); font-weight: var(--wx-w-medium); fill: var(--wx-ink); font-variant-numeric: tabular-nums;
+.yearlabel { font-size: var(--wx-fs-small); font-weight: var(--wx-w-medium); fill: var(--wx-ink); font-variant-numeric: tabular-nums;
   paint-order: stroke; stroke: var(--wx-surface); stroke-width: 4px; stroke-linejoin: round; }
 .table-wrap { overflow: auto; border-top: 1px solid var(--wx-grid); }
 .wide .table-wrap { height: 100%; }
@@ -547,35 +555,71 @@ thead th { position: sticky; top: 0; background: var(--wx-surface); font-weight:
 th:first-child, td:first-child { position: sticky; left: 0; z-index: 1; background: var(--wx-surface); padding-right: 16px; box-shadow: inset -1px 0 0 var(--wx-grid); }
 thead th:first-child { z-index: 2; }
 tr.fc td { color: var(--wx-ink2); }
-@media (prefers-reduced-motion: reduce) { .dial .needle, .sc-mark { transition: none; } }
 `;
 
   class TempestStationCard extends HTMLElement {
     static getStubConfig(hass) {
-      const id = Object.keys(hass?.states ?? {}).find((e) => /^sensor\.st_[0-9a-z]+_temperature$/.test(e));
-      return id ? { station: id.slice(7, -12) } : {};
+      const slug = findStation(hass?.states ?? {});
+      return slug ? { station: slug } : {};
+    }
+
+    static getConfigForm() {
+      const labels = { station: "Station", forecast: "Forecast", name: "Place name", range: "Opens on" };
+      const helpers = {
+        station: "The entity slug, such as st_00012345 from sensor.st_00012345_temperature. Found automatically when left empty.",
+        forecast: "A weather entity whose forecast draws the dashed lines and bars.",
+        name: "Heads the left column in place of \u201cNow\u201d.",
+        range: "Each viewer's last choice is remembered in their browser.",
+      };
+      return {
+        schema: [
+          { name: "station", selector: { text: {} } },
+          { name: "forecast", selector: { entity: { domain: "weather" } } },
+          { name: "name", selector: { text: {} } },
+          { name: "range", selector: { select: { mode: "dropdown", options: RANGES.map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) })) } } },
+        ],
+        computeLabel: (sch) => labels[sch.name],
+        computeHelper: (sch) => helpers[sch.name],
+      };
     }
 
     setConfig(config) {
       if (!config || typeof config !== "object") throw new Error("tempest-station-card: invalid configuration");
+      const before = this._config;
       this._config = { forecast: "weather.forecast_home", ...config };
       this._ents = null;
+      if (before && (before.station !== this._config.station || before.forecast !== this._config.forecast || JSON.stringify(before.entities ?? null) !== JSON.stringify(this._config.entities ?? null))) {
+        // Another station or forecast: nothing fetched for the old one may be shown for the new one.
+        this._stats = {}; this._daily = {}; this._long = {}; this._rapid = []; this._fc = { hourly: [], daily: [] }; this._hassKey = null;
+        const u = this._unsubFc; this._unsubFc = null;
+        if (u) Promise.resolve(u).then((fn) => typeof fn === "function" && fn()).catch(() => {});
+        if (this._hass) { this._resolve(); if (this._ents) { this._refresh(); this._subscribeForecast(); } }
+      }
       if (!this._range) {
         // The viewer's last choice wins over the dashboard's default; storage can be unavailable.
         let stored = null;
-        try { stored = window.localStorage.getItem(RANGE_KEY); } catch (e) { stored = null; }
+        try { stored = window.localStorage.getItem(`${RANGE_KEY}:${this._config.station ?? ""}`); } catch (e) { stored = null; }
         this._range = RANGES.includes(stored) ? stored : RANGES.includes(config.range) ? config.range : "hours";
       }
       if (this._hass) { this._resolve(); this._renderAll(); }
     }
 
+    // Home Assistant hands every card a new hass on any state change in the house. The card answers only to its
+    // own entities, the forecast entity and the theme, so an unrelated light switch costs it nothing.
     set hass(hass) {
       const first = !this._hass;
       this._hass = hass;
-      if (!this._ents) this._resolve();
-      this.classList.toggle("dark", !!hass.themes?.darkMode);
-      if (!this._ents) { this._renderMissing(); return; }
+      if (!this._ents && (!this._resolvedAt || Date.now() - this._resolvedAt > 10e3)) { this._resolvedAt = Date.now(); this._resolve(); }
+      const dark = !!hass.themes?.darkMode;
+      this.classList.toggle("dark", dark);
+      if (!this._ents) { if (!this._missing) { this._missing = true; this._renderMissing(); } return; }
+      this._missing = false;
+      if (!this.isConnected) return;
+      const key = `${dark}|${Object.values(this._ents).map((id) => hass.states[id]?.last_reported ?? hass.states[id]?.last_updated ?? "").join("|")}|${hass.states[this._config.forecast]?.last_updated ?? ""}`;
+      if (!first && this._mounted && key === this._hassKey) return;
+      this._hassKey = key;
       this._ingestRapid();
+      if (!this._unsubFc) this._subscribeForecast();
       if (first || !this._mounted) {
         this._mount();
         this._refresh();
@@ -600,6 +644,7 @@ tr.fc td { color: var(--wx-ink2); }
     disconnectedCallback() {
       clearInterval(this._timer);
       clearInterval(this._tick);
+      clearTimeout(this._rz);
       window.removeEventListener("resize", this._onResize);
       this._ro?.disconnect();
       this._mounted = false;
@@ -613,10 +658,7 @@ tr.fc td { color: var(--wx-ink2); }
     _resolve() {
       const states = this._hass.states;
       let slug = this._config.station;
-      if (!slug) {
-        const id = Object.keys(states).find((e) => /^sensor\.st_[0-9a-z]+_temperature$/.test(e));
-        slug = id ? id.slice(7, -12) : null;
-      }
+      if (!slug) slug = findStation(states);
       if (!slug) { this._ents = null; return; }
       const over = this._config.entities ?? {};
       const ents = {};
@@ -637,15 +679,16 @@ tr.fc td { color: var(--wx-ink2); }
     _fmt() {
       const lang = this._hass.locale?.language ?? this._hass.language ?? "en";
       const tz = this._hass.config?.time_zone;
-      const clock = this._hass.locale?.time_format;
-      if (!this._fmtCache || this._fmtCache.lang !== lang || this._fmtCache.tz !== tz || this._fmtCache.clock !== clock) { this._fmtCache = new Fmt(lang, tz, clock); this._fmtCache.clock = clock; }
+      const clock = this._hass.locale?.time_format, numbers = this._hass.locale?.number_format;
+      const c = this._fmtCache;
+      if (!c || c.lang !== lang || c.tz !== tz || c.clock !== clock || c.numbers !== numbers) this._fmtCache = new Fmt(lang, tz, clock, numbers);
       return this._fmtCache;
     }
 
     _ingestRapid() {
       const s = this._st("wind_speed"), d = this._st("wind_direction");
       if (!s || !d) return;
-      const t = Date.parse(s.last_updated);
+      const t = Date.parse(s.last_reported ?? s.last_updated);
       const last = this._rapid[this._rapid.length - 1];
       if (last && last.t >= t) return;
       const ms = SPEED.to(parseFloat(s.state), this._unit("wind_speed"));
@@ -657,7 +700,8 @@ tr.fc td { color: var(--wx-ink2); }
     }
 
     async _refresh() {
-      if (!this._hass || !this._ents) return;
+      if (!this._hass || !this._ents || this._refreshing) return;
+      this._refreshing = true;
       const now = Date.now();
       const day0 = this._fmt().startOfDay(this._fmt().startOfDay(now) - (PAST_DAYS - 1) * DAY + 12 * HOUR);
       try {
@@ -666,7 +710,7 @@ tr.fc td { color: var(--wx-ink2); }
             end_time: new Date(now).toISOString(), statistic_ids: STAT_KEYS.map((k) => this._ents[k]), period: "5minute",
             types: ["mean", "min", "max", "change"] }),
           this._hass.callWS({ type: "recorder/statistics_during_period", start_time: new Date(day0).toISOString(),
-            statistic_ids: DAILY_KEYS.map((k) => this._ents[k]), period: "day", types: ["mean", "min", "max", "change"] }),
+            statistic_ids: LONG_KEYS.map((k) => this._ents[k]), period: "day", types: ["mean", "min", "max", "change"] }),
         ]);
         this._stats = short ?? {};
         this._daily = daily ?? {};
@@ -678,12 +722,12 @@ tr.fc td { color: var(--wx-ink2); }
     }
 
     _subscribeForecast() {
-      const entity_id = this._config.forecast;
+      const entityId = this._config.forecast;
       const conn = this._hass?.connection;
-      if (!entity_id || !conn?.subscribeMessage || this._unsubFc || !this._hass.states[entity_id]) return;
+      if (!entityId || !conn?.subscribeMessage || this._unsubFc || !this._hass.states[entityId]) return;
       const sub = (type) => conn.subscribeMessage((msg) => {
-        const a = this._hass.states[entity_id]?.attributes ?? {};
-        const tu = this._unit("temperature"), su = this._unit("wind_speed_average"), ru = this._unit("precipitation");
+        const a = this._hass.states[entityId]?.attributes ?? {};
+        const tu = this._unit("temperature"), su = this._unit("wind_speed") || this._unit("wind_speed_average"), ru = this._unit("precipitation");
         const temp = (v) => (v == null ? null : fromC(toC(v, a.temperature_unit ?? tu), tu));
         this._fc[type] = (msg?.forecast ?? []).map((x) => ({
           t: Date.parse(x.datetime),
@@ -693,7 +737,7 @@ tr.fc td { color: var(--wx-ink2); }
           rh: x.humidity ?? null,
         }));
         this._renderAll();
-      }, { type: "weather/subscribe_forecast", entity_id, forecast_type: type });
+      }, { type: "weather/subscribe_forecast", entity_id: entityId, forecast_type: type });
       const subs = [sub("hourly"), sub("daily")];
       this._unsubFc = Promise.all(subs.map((p) => p.catch(() => null))).then((fs) => () => fs.forEach((f) => f && f()));
     }
@@ -729,7 +773,8 @@ tr.fc td { color: var(--wx-ink2); }
       const today = (pts) => pts.filter((p) => p.start >= sod);
 
       // Temperature
-      const tu = this._unit("temperature") || "°F";
+      const metric = this._hass.config?.unit_system?.length === "km";
+      const tu = this._unit("temperature") || (metric ? "°C" : "°F");
       const t = this._num("temperature");
       const feels = this._num("feels_like");
       const tPts = this._pts("temperature");
@@ -748,7 +793,6 @@ tr.fc td { color: var(--wx-ink2); }
         since: firstToday && firstToday.start - sod > 20 * 60e3 ? firstToday.start : null,
         trend: hourAgo && t !== null ? t - hourAgo.v : null,
         word: t === null ? "" : tempWord(fromC(toC(t, tu), "°F")),
-        fcHi: fcToday?.temp ?? null, fcLo: fcToday?.low ?? null,
       };
 
       // Moisture
@@ -756,35 +800,28 @@ tr.fc td { color: var(--wx-ink2); }
       const dewF = dew === null ? null : fromC(toC(dew, tu), "°F");
       m.moist = { rh: this._num("humidity"), dew, dewF, comfort: dewF === null ? null : comfort(dewF) };
 
-      // Pressure (station pressure; sea-level when an elevation is known)
+      // Pressure, as the station reads it
       const pu = this._unit("air_pressure") || "hPa";
       const p = this._num("air_pressure");
-      const elev = Number(this._config.elevation ?? cfg.elevation ?? 0);
-      let slp = null;
-      if (p !== null && elev > 0 && t !== null) {
-        const tc = toC(t, tu);
-        slp = PRES.from(PRES.to(p, pu) * (1 - (0.0065 * elev) / (tc + 0.0065 * elev + 273.15)) ** -5.257, pu);
-      }
       const pPts = this._pts("air_pressure");
       const ago3 = nearest(pPts, now - 3 * HOUR, 10 * 60e3);
-      m.pres = { v: p, unit: pu, slp, elev, have: pPts.length ? now - pPts[0].start : 0 };
+      m.pres = { v: p, unit: pu, have: pPts.length ? now - pPts[0].start : 0 };
       if (p !== null && ago3) {
         const dH = PRES.to(p, pu) - PRES.to(ago3.v, pu);
         m.pres.tend = { ...tendency(dH), dHpa: dH };
       }
 
       // Wind
-      const su = this._unit("wind_speed") || "mph";
+      const su = this._unit("wind_speed") || (metric ? "km/h" : "mph");
       const ws = this._num("wind_speed"), wd = this._num("wind_direction");
       const recent = this._rapid.filter((r) => r.t >= now - 10 * 60e3);
       m.wind = {
         v: ws, unit: su, dir: wd, card: wd === null ? "" : CARD16[sector16(wd)],
         bf: ws === null ? null : beaufort(SPEED.to(ws, su)),
         avg: this._num("wind_speed_average"), gust: this._num("wind_gust"), lull: this._num("wind_lull"),
-        recentSpan: recent.length ? now - recent[0].t : 0,
       };
       // Where the wind has come from over the last 10 minutes of 3-second samples: a smoothed share per 5° of rim.
-      // Every value is a real sample; nothing is drawn where the wind hasn't been.
+      // Each sample lights its own 5° and, more faintly, the 10° either side; nothing lights where no sample came from.
       const dirs = recent.filter((r) => r.ms >= 0.3).map((r) => norm360(r.dir));
       if (dirs.length >= 4) {
         const bins = new Array(RING).fill(0);
@@ -792,9 +829,10 @@ tr.fc td { color: var(--wx-ink2); }
         const top = Math.max(...bins);
         m.wind.ring = bins.map((b) => b / top);
       }
-      // 24 h rose from 5-minute mean direction (circular) and mean speed.
+      // 24 h rose from the recorder's 5-minute mean direction and mean speed. (The recorder averages a plain
+      // direction sensor arithmetically; a station whose direction has the measurement_angle state class gets a true circular mean.)
       const dPts = this._pts("wind_direction"), sPts = this._pts("wind_speed");
-      const rose = Array.from({ length: 16 }, () => ({ n: 0, sum: 0 }));
+      const rose = Array.from({ length: 16 }, () => ({ n: 0 }));
       let calm = 0, total = 0;
       for (const dp of dPts) {
         const sp = nearest(sPts, dp.t, 60e3);
@@ -804,44 +842,43 @@ tr.fc td { color: var(--wx-ink2); }
         const r = rose[sector16(dp.v)];
         r.n++; r.sum += sp.v;
       }
-      m.wind.rose = rose.map((r, i) => ({ dir: CARD16[i], share: total ? r.n / total : 0, mean: r.n ? r.sum / r.n : null }));
-      m.wind.calm = total ? calm / total : null;
+      m.wind.rose = rose.map((r, i) => ({ dir: CARD16[i], share: total ? r.n / total : 0 }));
       m.wind.roseSpan = dPts.length ? now - dPts[0].start : 0;
 
       // Sun and light
       const el = sunElevation(now, lat, lon);
-      const st = sunTimes(sod, lat, lon);
+      if (this._sunDay?.sod !== sod || this._sunDay.lat !== lat || this._sunDay.lon !== lon) this._sunDay = { sod, lat, lon, st: sunTimes(sod, lat, lon) };
+      const st = this._sunDay.st;
       const uv = this._num("uv_index");
       const irr = this._num("irradiance");
       m.sun = {
-        el, clear: clearSky(el), irr, uv, uvs: uv === null ? null : uvScale(uv),
+        el, irr, uv, uvs: uv === null ? null : uvScale(uv),
         rise: st.rise, set: st.set,
         // Below 10° the clear-sky model and the sensor's cosine response both get unreliable.
         pct: irr !== null && el > 10 && clearSky(el) > 0 ? irr / clearSky(el) : null,
-        kwh: today(this._pts("irradiance")).reduce((a, p2) => a + (p2.v * FIVE_MIN) / HOUR / 1000, 0),
+        kwh: today(this._pts("irradiance")).length ? today(this._pts("irradiance")).reduce((a, p2) => a + (p2.v * FIVE_MIN) / HOUR / 1000, 0) : null,
       };
       if (st.rise && now < st.rise) m.sun.next = { word: "Rises", t: st.rise };
       else if (st.set && now < st.set) m.sun.next = { word: "Sets", t: st.set };
       else { const tm = sunTimes(sod + DAY, lat, lon); m.sun.next = tm.rise ? { word: "Rises", t: tm.rise } : null; }
 
       // Rain
-      const ru = this._unit("precipitation") || "in";
-      const iu = this._unit("precipitation_intensity") || "in/h";
+      const ru = this._unit("precipitation") || (metric ? "mm" : "in");
+      const iu = this._unit("precipitation_intensity") || (metric ? "mm/h" : "in/h");
       const rate = this._num("precipitation_intensity");
       const rChanges = this._pts("precipitation", "change");
       const ptype = this._st("precipitation_type")?.state;
       m.rain = {
         today: rChanges.length ? today(rChanges).reduce((a, p2) => a + Math.max(0, p2.v), 0) : null,
         unit: ru, rate, rateUnit: iu, rs: rate === null ? null : rainRate(DEPTH.to(rate, iu)),
-        type: ptype && !["none", "unknown", "unavailable"].includes(ptype) ? ptype.replace("_", " and ") : null,
-        have: rChanges.length ? now - rChanges[0].start : 0,
+        type: ({ rain: "rain", hail: "hail", rain_hail: "rain and hail", sleet: "sleet", snow: "snow" })[ptype] ?? null,
       };
 
       // Lightning
       const lChanges = this._pts("lightning_count", "change");
       const lSum = (since) => lChanges.filter((p2) => p2.start >= since).reduce((a, p2) => a + Math.max(0, p2.v), 0);
       const lastStrike = Date.parse(this._st("lightning_last_strike")?.state ?? "");
-      const du = this._unit("lightning_last_distance") || "mi";
+      const du = this._unit("lightning_last_distance") || (metric ? "km" : "mi");
       const ld = this._num("lightning_last_distance");
       m.bolt = {
         h24: lSum(now - PAST),
@@ -859,9 +896,8 @@ tr.fc td { color: var(--wx-ink2); }
         const t2 = Math.max(Date.parse(s.last_updated) || 0, Date.parse(s.last_reported ?? "") || 0);
         if (t2 && (obs === null || t2 > obs)) obs = t2;
       }
-      const firstStat = Object.values(this._stats).flat().reduce((a, r) => Math.min(a, typeof r.start === "number" ? r.start : Date.parse(r.start)), Infinity);
       const bv = this._num("battery_voltage");
-      m.station = { bv, mode: bv === null ? null : powerMode(bv), obs, since: Number.isFinite(firstStat) ? firstStat : null };
+      m.station = { bv, mode: bv === null ? null : powerMode(bv), obs };
 
       m.lede = this._lede(m);
       return m;
@@ -907,12 +943,13 @@ tr.fc td { color: var(--wx-ink2); }
         const range = e.target.closest?.("[data-range]");
         if (range) {
           this._range = range.dataset.range;
-          try { window.localStorage.setItem(RANGE_KEY, this._range); } catch (err) { /* not remembered */ }
+          try { window.localStorage.setItem(`${RANGE_KEY}:${this._config.station ?? ""}`, this._range); } catch (err) { /* not remembered */ }
           this._mgT = null;
           this._renderAll();
           return;
         }
         if (e.target.closest?.("[data-table]")) { this._table = !this._table; this._renderAll(); }
+        if (e.target.closest?.("[data-csv]")) this._downloadCsv();
       });
       const away = () => { if (this._mgHold === "pointer") { this._mgHold = null; this._mgShow(null); } };
       this._root.addEventListener("pointermove", (e) => { if (!e.target.closest?.(".mg")) away(); });
@@ -936,10 +973,10 @@ tr.fc td { color: var(--wx-ink2); }
       let avail = 0;
       if (mode === "wide") avail = Math.max(540, Math.floor(window.innerHeight - Math.max(0, this.getBoundingClientRect().top)));
       const tight = mode === "wide" && avail < 700;
-      const S = mode === "wide" ? Math.round(Math.max(128, Math.min(176, 128 + (avail - 660) * 0.3))) : mode === "mid" ? 184 : 168;
-      const changed = force || mode !== this._mode || tight !== this._tight || S !== this._S;
+      const dialPref = mode === "wide" ? Math.round(Math.max(128, Math.min(176, 128 + (avail - 660) * 0.3))) : mode === "mid" ? 184 : 168;
+      const changed = force || mode !== this._mode || tight !== this._tight || dialPref !== this._dialPref;
       if (changed) this._ledeW = 0;
-      this._mode = mode; this._tight = tight; this._S = S;
+      this._mode = mode; this._tight = tight; this._dialPref = dialPref;
       this._body.className = `wrap ${mode}${tight ? " tight" : ""}`;
       this._body.style.setProperty("--wx-h", mode === "wide" ? `${avail}px` : "auto");
       if (changed) this._renderAll();
@@ -999,8 +1036,8 @@ tr.fc td { color: var(--wx-ink2); }
       const cs = getComputedStyle(row);
       const h = row.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
       const D = Math.floor(Math.max(96, Math.min(this._tileW() - 16, h)));
-      if (D === this._D) return;
-      this._D = D;
+      if (D === this._dialSize) return;
+      this._dialSize = D;
       dial.style.width = dial.style.height = `${D}px`;
       dial.innerHTML = this._dialSvg(this._m, D);
       this._needleAngle = undefined;
@@ -1023,7 +1060,7 @@ tr.fc td { color: var(--wx-ink2); }
       if (now?.querySelector(".top")?.offsetHeight !== before) this._drawCharts();
     }
 
-    // Which band each scale is in; a change re-renders the scales.
+    // Which band each scale is in, plus the alerts; a change redraws the Now column.
     _keyOf(m) {
       return [m.wind.bf?.i, m.pres.tend?.i, m.moist.comfort?.i, m.sun.uvs?.i, m.rain.rs?.i, m.bolt.near,
         Math.floor((m.station.mode ?? 0) * 2), this._stale(m)].join("|");
@@ -1053,13 +1090,13 @@ tr.fc td { color: var(--wx-ink2); }
     _alerts(m) {
       const f = m.f, out = [];
       const row = (color, text) => `<div class="alert"><i style="background:var(${color})"></i><span>${text}</span></div>`;
-      if (m.bolt.near) out.push(row("--wx-critical", `<b>Lightning ${esc(f.num(m.bolt.dist))}${NB}${esc(m.bolt.distUnit)} away</b>, ${esc(f.ago(m.now - m.bolt.last))}. Within ${STRIKE_MI}${NB}mi is striking distance: go indoors.`));
+      if (m.bolt.near) out.push(row("--wx-critical", `<b>Lightning ${esc(f.num(m.bolt.dist))}${NB}${esc(m.bolt.distUnit)} away</b>, ${esc(f.ago(m.now - m.bolt.last))}. Within ${m.bolt.distUnit === "km" ? `16${NB}km` : `${STRIKE_MI}${NB}mi`} is striking distance: go indoors.`));
       if (this._stale(m)) out.push(row("--wx-warn", `<b>No report from the station</b> for ${esc(f.dur(m.now - m.station.obs))}.`));
       if (m.station.mode !== null && m.station.mode >= 1) {
         const p = POWER[Math.floor(m.station.mode)];
         out.push(row("--wx-warn", `<b>Battery ${esc(f.num(m.station.bv, 2))}${NB}V</b>: the station is in ${esc(p.label)}, ${esc(p.detail)}.`));
       }
-      if (this._error) out.push(row("--wx-warn", `<b>History unavailable</b>: ${esc(this._error)}`));
+      if (this._error) out.push(row("--wx-warn", `<b title="${esc(this._error)}">History unavailable.</b> The recorder's statistics could not be read; live readings still work.`));
       return out.join("");
     }
 
@@ -1096,7 +1133,7 @@ tr.fc td { color: var(--wx-ink2); }
           verdict: `${span2(f.num(T.lo.v, 1), f.num(T.hi.v, 1))}°`,
           fill: { from: fr(T.lo.v), to: fr(T.hi.v), color: "var(--wx-temp)" },
           pos: T.v === null ? null : { i: 0, f: fr(T.v) },
-          poles: [`Low ${f.time(T.lo.t)}`, `High ${f.time(T.hi.t)}`],
+          poles: T.lo.t === T.hi.t ? [] : [`Low ${f.time(T.lo.t)}`, `High ${f.time(T.hi.t)}`],
           aria: `Today ${f.num(T.lo.v, 1)} to ${f.num(T.hi.v, 1)} degrees`,
         }));
       } else out.push(this._scale("today", { label: "Today", verdict: "—", aria: "No temperature yet today" }));
@@ -1119,7 +1156,7 @@ tr.fc td { color: var(--wx-ink2); }
 
       const P = m.pres, t = P.tend;
       out.push(this._scale("tend", {
-        label: `Pressure, last 3${NB}h`, verdict: t ? t.word : "Collecting", value: t ? tendIn(f, t.dHpa, P.unit).text : f.dur(P.have),
+        label: `Pressure, last 3${NB}h`, verdict: t ? t.word : "Collecting", value: t ? tendIn(f, t.dHpa, P.unit).text : P.have >= 60e3 ? f.dur(P.have) : "",
         bands: equal(9, "var(--wx-pres)"), active: t ? t.i : -1, pos: t ? { i: t.i, f: t.f } : null,
         notches: [4, 5], poles: ["Falling", "Rising"],
         aria: t ? `Pressure ${t.word.toLowerCase()}, ${tendIn(f, t.dHpa, P.unit).text.split(NB)[0]} ${tendIn(f, t.dHpa, P.unit).words} in 3 hours` : "Pressure tendency needs 3 hours of data",
@@ -1147,8 +1184,8 @@ tr.fc td { color: var(--wx-ink2); }
     /* ----- the time column ----- */
 
     _timeCol(m) {
-      const f = m.f, W = m.wind, D = this._mode === "narrow" ? this._S : Math.min(this._tileW() - 16, this._S);
-      this._D = D;
+      const f = m.f, W = m.wind, D = this._mode === "narrow" ? this._dialPref : Math.min(this._tileW() - 16, this._dialPref);
+      this._dialSize = D;
       const wind = `<div class="zone inst wind">
           <div class="dial" style="width:${D}px;height:${D}px">${this._dialSvg(m, D)}</div>
           <div class="txt"><h2>Wind</h2>
@@ -1168,7 +1205,7 @@ tr.fc td { color: var(--wx-ink2); }
         <div class="hist"><div class="head mg-head"><h2 data-k="mgtitle"></h2>
           <div class="head-r">
             <span class="seg" role="group" aria-label="Time range">${RANGES.map((r) => `<button data-range="${r}" aria-pressed="${this._range === r}">${r[0].toUpperCase()}${r.slice(1)}</button>`).join("")}</span>
-            <button class="tbtn" data-table aria-pressed="${!!this._table}">${this._table ? "Chart" : "Table"}</button></div></div>
+            <button class="tbtn" data-table aria-pressed="${!!this._table}">${this._table ? "Chart" : "Table"}</button>${this._table ? `<button class="tbtn" data-csv title="Download these rows as CSV">CSV</button>` : ""}</div></div>
         <div class="mg-body" data-mg></div></div></section>`;
     }
 
@@ -1259,7 +1296,7 @@ tr.fc td { color: var(--wx-ink2); }
         g += `<line x1="${nx}" x2="${nx}" y1="${padT}" y2="${base.toFixed(1)}" stroke="var(--wx-axis)"/>`;
         if (m.sun.irr !== null) g += `<circle cx="${nx}" cy="${sy(m.sun.irr).toFixed(1)}" r="4" fill="var(--wx-sun)" stroke="var(--wx-surface)" stroke-width="2"/>`;
       }
-      const aria = `Sunlight today: clear-sky potential and measured sunlight from ${m.sun.rise ? f.time(m.sun.rise) : "sunrise"} to ${m.sun.set ? f.time(m.sun.set) : "sunset"}; ${f.num(m.sun.kwh, 1)} kilowatt-hours per square metre so far`;
+      const aria = `Sunlight today: clear-sky potential and measured sunlight from ${m.sun.rise ? f.time(m.sun.rise) : "sunrise"} to ${m.sun.set ? f.time(m.sun.set) : "sunset"}; ${m.sun.kwh === null ? "no energy total yet" : `${f.num(m.sun.kwh, 1)} kilowatt-hours per square meter so far`}`;
       host.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="${esc(aria)}">${g}</svg>`;
     }
 
@@ -1267,7 +1304,7 @@ tr.fc td { color: var(--wx-ink2); }
 
     // Every strip answers two questions with the same shape of readout: what happened over the range
     // (its headline, idle) and what it was at one moment (under the crosshair).
-    // Readout: { value, unit, caption, lines: [{ text, color, dash, light }] }
+    // Readout: { value, unit, caption, lines: [{ text, color, dash, dot, light }] }
 
     // Hours: the last 24 h from 5-minute statistics and the next 12 from the forecast.
     _hoursSpec(m) {
@@ -1280,10 +1317,10 @@ tr.fc td { color: var(--wx-ink2); }
       const bridge = (k, pts) => (pts.length ? live(k).concat(pts) : pts);
       const tu = m.temp.unit, su = m.wind.unit, pu = m.pres.unit, ru = m.rain.unit;
       const deg = (v) => `${f.num(v, 1)}°`;
-      const pdp = pu === "inHg" ? 2 : 1, rdp = ru === "in" ? 2 : 1;
+      const pdp = presDp(pu), rdp = ru === "in" ? 2 : 1;
       const at8 = (pts, t) => nearest(pts, t, 8 * 60e3);
       const hourly = (changes) => {
-        const h0 = Math.floor(x0 / HOUR) * HOUR;
+        const h0 = f.startOfHour(x0);
         const bars = [];
         for (let t = h0; t < now; t += HOUR) bars.push({ t0: t, t1: t + HOUR, v: 0, n: 0 });
         for (const p of changes) { const b = bars[Math.floor((p.start - h0) / HOUR)]; if (b) { b.v += Math.max(0, p.v); b.n++; } }
@@ -1302,7 +1339,7 @@ tr.fc td { color: var(--wx-ink2); }
       const rateP = extreme(this._pts("precipitation_intensity", "max"), 1);
       const vpu = this._unit("vapor_pressure") || pu;
       const feelsOff = m.temp.feels !== null && m.temp.v !== null && Math.abs(m.temp.feels - m.temp.v) >= 0.3;
-      const hourRange = (b, t) => (b ? `${f.hour(b.t0)}–${f.hour(b.t1)}` : f.hour(Math.floor(t / HOUR) * HOUR));
+      const hourRange = (b, t) => (b ? `${f.hour(b.t0)}–${f.hour(b.t1)}` : f.hour(f.startOfHour(t)));
       const barAt = (s, t, unit) => {
         const b = s.bars.find((x) => t >= x.t0 && t < x.t1);
         return readout(s.fmt(b ? b.v : 0), unit, b?.fc ? `Forecast, ${hourRange(b, t)}` : hourRange(b, t));
@@ -1311,7 +1348,7 @@ tr.fc td { color: var(--wx-ink2); }
       const TEMP = "var(--wx-temp)", DEW = "var(--wx-dew)";
 
       const strips = [
-        { key: "temp", name: "Temperature", qual: "", bandLabel: "daily range", kind: "lines", h: 136, w: 2.3, min: 80, yFmt: (v) => `${f.num(v)}°`, minSpan: 6, extremes: "range",
+        { key: "temp", name: "Temperature", qual: "", kind: "lines", h: 136, w: 2.3, min: 80, yFmt: (v) => `${f.num(v)}°`, minSpan: 6,
           lines: [
             { key: "fc", color: "var(--wx-muted)", dash: true, pts: fc("temp"), draw: bridge("temperature", fc("temp")) },
             { key: "feels", color: "var(--wx-temp-2)", light: true, pts: FL, endName: feelsOff && FL.length ? `feels like ${deg(FL[FL.length - 1].v)}` : null },
@@ -1320,30 +1357,30 @@ tr.fc td { color: var(--wx-ink2); }
             { key: "t", color: TEMP, pts: T },
           ],
           head: () => { const v = this._num("temperature") ?? T[T.length - 1]?.v;
-            return readout(v == null ? "—" : deg(v), "", hiP && loP ? `High ${deg(hiP.v)} · low ${deg(loP.v)}` : "Collecting"); },
+            return readout(v == null ? "—" : deg(v), "", hiP && loP && hiP.t !== loP.t ? `High ${deg(hiP.v)} · low ${deg(loP.v)}` : ""); },
           at: (t) => {
             if (t > now) return ahead(fc("temp"), t, deg, "");
             const p = at8(T, t), d = at8(DP, t), w = at8(WB, t), fl = at8(FL, t);
-            return readout(p ? deg(p.v) : "—", "", "", [d && { text: `Dew point ${deg(d.v)}`, color: DEW, line: "dew" }, w && { text: `Wet bulb ${deg(w.v)}`, color: "var(--wx-wetbulb)", dot: true, light: true, line: "wet" },
-              fl && p && Math.abs(fl.v - p.v) >= 0.3 && { text: `Feels like ${deg(fl.v)}`, color: "var(--wx-temp-2)", light: true, line: "feels" }].filter(Boolean));
+            return readout(p ? deg(p.v) : "—", "", "", [d && { text: `Dew point ${deg(d.v)}`, color: DEW }, w && { text: `Wet bulb ${deg(w.v)}`, color: "var(--wx-wetbulb)", dot: true },
+              fl && p && Math.abs(fl.v - p.v) >= 0.3 && { text: `Feels like ${deg(fl.v)}`, color: "var(--wx-temp-2)", light: true }].filter(Boolean));
           },
           cols: [{ head: "Temperature", pts: T, fmt: deg, fc: fc("temp") }, { head: "Feels like", pts: FL, fmt: deg }, { head: "Dew point", pts: DP, fmt: deg }, { head: "Wet bulb", pts: WB, fmt: deg }] },
-        { key: "wind", name: "Avg wind", qual: "", bandLabel: "gusts", kind: "lines", h: 88, w: 1.5, min: 56, yFmt: (v) => f.num(v), yMin: 0, minSpan: 10, extremes: "gust",
+        { key: "wind", name: "Avg wind", qual: "", bandLabel: "gusts", kind: "lines", h: 88, w: 1.5, min: 56, yFmt: (v) => f.num(v), yMin: 0, minSpan: 10,
           lines: [
             { key: "fc", color: "var(--wx-muted)", dash: true, pts: fc("wind"), draw: bridge("wind_speed_average", fc("wind")) },
             { key: "w", color: "var(--wx-wind)", pts: WA, band: windBand },
           ],
           head: () => { const v = this._num("wind_speed_average") ?? WA[WA.length - 1]?.v;
-            return readout(v == null ? "—" : f.num(v, 1), v == null ? "" : su, gustP ? `Gusts to ${f.num(gustP.v, 1)}${NB}${su}` : "Collecting"); },
+            return readout(v == null ? "—" : f.num(v, 1), v == null ? "" : su, gustP ? `Gusts to ${f.num(gustP.v, 1)}${NB}${su}` : ""); },
           at: (t) => {
             if (t > now) return ahead(fc("wind"), t, (v) => f.num(v, 1), su);
             const p = at8(WA, t), b = nearest(windBand, t, 8 * 60e3);
             return readout(p ? f.num(p.v, 1) : "—", p ? su : "", b ? `Gust ${f.num(b.hi, 1)}, lull ${f.num(b.lo, 1)}` : "");
           },
           cols: [{ head: `Wind (${su})`, pts: WA, fmt: (v) => f.num(v, 1), fc: fc("wind") }, { head: `Gust (${su})`, pts: gust, fmt: (v) => f.num(v, 1), agg: "max" }] },
-        { key: "pres", name: "Pressure", qual: "", kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, pu === "inHg" ? 2 : 0), minSpan: hpaIn(10, pu),
+        { key: "pres", name: "Pressure", qual: "", kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, presDp(pu) - 1), minSpan: hpaIn(10, pu),
           lines: [{ key: "p", color: "var(--wx-pres)", pts: P }],
-          head: () => readout(f.num(m.pres.v, pdp), pu, m.pres.tend ? `${tendIn(f, m.pres.tend.dHpa, pu).text} in 3${NB}h` : `Trend after 3${NB}h; ${f.dur(m.pres.have)} so far`),
+          head: () => readout(f.num(this._num("air_pressure") ?? m.pres.v, pdp), pu, m.pres.tend ? `${tendIn(f, m.pres.tend.dHpa, pu).text} in 3${NB}h` : m.pres.have >= 60e3 ? `Trend after 3${NB}h; ${f.dur(m.pres.have)} so far` : `Trend after 3${NB}h`),
           at: (t) => {
             if (t > now) return readout("—", "", "No forecast");
             const p = at8(P, t), a = at8(AD, t);
@@ -1356,7 +1393,8 @@ tr.fc td { color: var(--wx-ink2); }
             { key: "rh", color: DEW, pts: RH },
           ],
           head: () => { const v = this._pts("humidity").concat(live("humidity")).map((p) => p.v);
-            return readout(RH.length ? f.num(RH[RH.length - 1].v) : "—", RH.length ? "%" : "", v.length ? `${span2(f.num(Math.min(...v)), f.num(Math.max(...v)))}% over 24${NB}h` : "Collecting"); },
+            const rh = this._num("humidity") ?? RH[RH.length - 1]?.v;
+            return readout(rh == null ? "—" : f.num(rh), rh == null ? "" : "%", v.length ? `${span2(f.num(Math.min(...v)), f.num(Math.max(...v)))}% over 24${NB}h` : ""); },
           at: (t) => {
             if (t > now) return ahead(fc("rh"), t, (v) => f.num(v), "%");
             const p = at8(RH, t), vp = at8(VP, t);
@@ -1364,14 +1402,14 @@ tr.fc td { color: var(--wx-ink2); }
           },
           cols: [{ head: "Humidity (%)", pts: RH, fmt: (v) => f.num(v), fc: fc("rh") }, { head: `Vapor pressure (${vpu})`, pts: VP, fmt: (v) => f.num(v, pdp) }] },
         { key: "rain", name: "Rain", qual: "", kind: "bars", h: 64, w: 1.05, min: 56, color: "var(--wx-rain)", bars: rainBars.concat(rainFc), fmt: (v) => f.num(v, rdp),
-          empty: rainBars.every((b) => b.v <= 0) && !rainFc.length ? "No rain in the last 24 hours, and none forecast" : null, zero: true,
+          empty: !rainBars.length && !rainFc.length ? "No rain history yet" : rainBars.every((b) => b.v <= 0) && !rainFc.length ? "No rain in the last 24 hours, and none forecast" : null, zero: rainBars.length > 0,
           head: () => readout(f.num(rainBars.reduce((a, b) => a + b.v, 0), rdp), ru, rateP && rateP.v > 0 ? `Peak ${f.num(rateP.v, rdp)}${NB}${m.rain.rateUnit}` : "",
             [{ text: `Today ${f.num(m.rain.today ?? 0, rdp)}${NB}${ru}` }]),
           at: (t) => barAt(strips.find((s) => s.key === "rain"), t, ru),
           cols: [{ head: `Rain (${ru})`, bars: true }, { head: `Rain rate, peak (${m.rain.rateUnit})`, pts: this._pts("precipitation_intensity", "max"), fmt: (v) => f.num(v, rdp), agg: "max" }] },
         { key: "bolt", name: "Lightning", qual: "", kind: "bars", h: 64, w: 1.05, min: 56, color: "var(--wx-bolt)", bars: boltBars, fmt: (v) => f.num(v),
-          empty: boltBars.every((b) => b.v <= 0) ? "No lightning detected in the last 24 hours" : null, zero: true,
-          head: () => readout(f.num(m.bolt.h24), "strikes", m.bolt.recent ? `Latest ${f.num(m.bolt.dist)}${NB}${m.bolt.distUnit} away, ${f.ago(now - m.bolt.last)}` : ""),
+          empty: !boltBars.length ? "No lightning history yet" : boltBars.every((b) => b.v <= 0) ? "No lightning detected in the last 24 hours" : null, zero: boltBars.length > 0,
+          head: () => readout(f.num(m.bolt.h24), "strikes", m.bolt.recent ? `Latest ${f.num(m.bolt.dist)}${NB}${m.bolt.distUnit} away, ${f.ago(Date.now() - m.bolt.last)}` : ""),
           at: (t) => barAt(strips.find((s) => s.key === "bolt"), t, "strikes"),
           cols: [{ head: "Lightning (strikes)", bars: true }, { head: "Battery (V)", pts: this._pts("battery_voltage"), fmt: (v) => f.num(v, 2) }] },
       ];
@@ -1382,7 +1420,7 @@ tr.fc td { color: var(--wx-ink2); }
         when: (t) => `${f.when(t, now)}${t > now ? ", forecast" : ""}`,
         table: () => {
           const rows = [];
-          for (let t = Math.floor(x1 / HOUR) * HOUR; t >= x0; t -= HOUR) rows.push(t);
+          for (let t = f.startOfHour(x1); t >= x0; t -= HOUR) rows.push(t);
           const sunCols = [{ head: "Sunlight (W/m²)", pts: IRR, fmt: (v) => f.num(v) }, { head: "UV index", pts: UV, fmt: (v) => f.num(v, 1) }, { head: "Light (lx)", pts: LUX, fmt: (v) => f.num(v) }];
           const cols = strips.flatMap((s) => s.cols.map((c) => ({ s, c }))).concat(sunCols.map((c) => ({ s: null, c })));
           return {
@@ -1417,7 +1455,7 @@ tr.fc td { color: var(--wx-ink2); }
       const mid = (d) => d + (next(d) - d) / 2;
       const su = m.wind.unit, pu = m.pres.unit, ru = m.rain.unit;
       const deg = (v) => `${f.num(v)}°`;
-      const pdp = pu === "inHg" ? 2 : 1, rdp = ru === "in" ? 2 : 1;
+      const pdp = presDp(pu), rdp = ru === "in" ? 2 : 1;
       const past = days.filter((d) => d <= sod), fut = days.filter((d) => d > sod);
       const val = (map, d, field) => { const r = map.get(d); const v = r?.[field]; return Number.isFinite(v) ? v : null; };
       const line = (map, field) => past.map((d) => ({ t: mid(d), v: val(map, d, field), d })).filter((p) => p.v !== null);
@@ -1434,7 +1472,7 @@ tr.fc td { color: var(--wx-ink2); }
       });
       const boltBars = past.map((d) => ({ t0: d, t1: next(d), v: Math.max(0, val(LR, d, "change") ?? 0) }));
       // Daily sunshine as energy: mean irradiance over the day, in kWh/m².
-      const sunBars = past.map((d) => ({ t0: d, t1: next(d), v: (val(IR, d, "mean") ?? 0) * 0.024 }));
+      const sunBars = past.map((d) => ({ t0: d, t1: next(d), v: d === sod ? m.sun.kwh ?? 0 : (val(IR, d, "mean") ?? 0) * 0.024 }));
       const fcWind = fut.map((d) => ({ t: mid(d), v: fcd.get(d)?.wind ?? null })).filter((p) => p.v !== null);
       const fcRh = fut.map((d) => ({ t: mid(d), v: fcd.get(d)?.rh ?? null })).filter((p) => p.v !== null);
       const windLine = line(WA, "mean"), windBand = band(WL, "min", WG, "max");
@@ -1461,7 +1499,7 @@ tr.fc td { color: var(--wx-ink2); }
         { key: "temp", name: "Temperature", qual: "", kind: "range", h: 136, w: 2.3, min: 80, yFmt: (v) => `${f.num(v)}°`, minSpan: 6, color: "var(--wx-temp)", ranges,
           head: () => {
             const hi = top(obsRanges, "hi", 1), lo = top(obsRanges, "lo", -1);
-            return readout(hi && lo ? `${span2(f.num(lo.lo), f.num(hi.hi))}°` : "—", "", hi && lo ? cap(`low ${dayName(lo.t0)} · high ${dayName(hi.t0)}`) : "Collecting",
+            return readout(hi && lo ? `${span2(f.num(lo.lo), f.num(hi.hi))}°` : "—", "", hi && lo ? `Low ${dayName(lo.t0)} · high ${dayName(hi.t0)}` : "",
               obsRanges.length ? [{ text: `Average high ${deg(mean(obsRanges.map((r) => r.hi)))}, low ${deg(mean(obsRanges.map((r) => r.lo)))}` }] : []);
           },
           at: (t) => { const i = dayIdx(t); const r = i < 0 ? null : ranges.find((x) => x.t0 === days[i]);
@@ -1471,7 +1509,7 @@ tr.fc td { color: var(--wx-ink2); }
           head: () => { const g = top(windBand, "hi", 1);
             return readout(windLine.length ? f.num(mean(windLine.map((p) => p.v)), 1) : "—", windLine.length ? su : "", g ? `Gusts to ${f.num(g.hi, 1)}, ${dayName(g.d)}` : "Collecting"); },
           at: lineAt(windLine, windBand, fcWind, (v) => f.num(v, 1), su) },
-        { key: "pres", name: "Avg pressure", qual: "", bandLabel: "daily range", kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, pu === "inHg" ? 2 : 0), minSpan: hpaIn(20, pu),
+        { key: "pres", name: "Avg pressure", qual: "", bandLabel: "daily range", kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, presDp(pu) - 1), minSpan: hpaIn(20, pu),
           lines: [{ key: "p", color: "var(--wx-pres)", pts: presLine, band: presBand }],
           head: () => { const v = presLine.map((p) => p.v);
             return readout(v.length ? f.num(mean(v), pdp) : "—", v.length ? pu : "", v.length ? `Range ${span2(f.num(Math.min(...v), pdp), f.num(Math.max(...v), pdp))}` : "Collecting"); },
@@ -1499,10 +1537,9 @@ tr.fc td { color: var(--wx-ink2); }
       const todayIdx = days.indexOf(sod);
       return {
         range: "days", title: `Last ${n} ${n === 1 ? "day" : "days"}${fut.length ? ` and next ${fut.length}` : ""}`,
-        x0, x1, now: null, wash: [sod, next(sod)], days, todayIdx, step: DAY, bigStep: 7 * DAY, key: fut.length ? "kb" : null,
+        x0, x1, wash: [sod, next(sod)], days, todayIdx, step: DAY, bigStep: 7 * DAY, key: fut.length ? "kb" : null,
         snap: (t) => { const i = dayIdx(t); return i < 0 ? t : mid(days[i]); }, strips,
         when: (t) => { const i = dayIdx(t); return i < 0 ? "" : `${f.dayLabel(days[i])}${days[i] > sod ? ", forecast" : ""}`; },
-        axis: { kind: "days" },
         table: () => ({
           head: ["Day", "High", "Low", `Wind (${su})`, `Gust (${su})`, `Pressure (${pu})`, "Humidity (%)", "Sunshine (kWh/m²)", `Rain (${ru})`, "Lightning (strikes)"],
           rows: days.slice().reverse().map((d) => {
@@ -1527,7 +1564,7 @@ tr.fc td { color: var(--wx-ink2); }
       const mid = (d) => d + (next(d) - d) / 2;
       const su = m.wind.unit, pu = m.pres.unit, ru = m.rain.unit;
       const deg = (v) => `${f.num(v)}°`, deg1 = (v) => `${f.num(v, 1)}°`;
-      const pdp = pu === "inHg" ? 2 : 1, rdp = ru === "in" ? 2 : 1;
+      const pdp = presDp(pu), rdp = ru === "in" ? 2 : 1;
       const fin = (v) => (Number.isFinite(v) ? v : null);
       const series = (k, field) => rows(k).filter((r) => r.d >= x0 && fin(r[field]) !== null).map((r) => ({ t: mid(r.d), v: r[field], d: r.d }));
       const bandOf = (kLo, fLo, kHi, fHi) => {
@@ -1546,7 +1583,7 @@ tr.fc td { color: var(--wx-ink2); }
         const rs = rows(k).filter((r) => r.d >= mo.t0 && r.d < mo.t1);
         return { t0: mo.t0, t1: mo.t1, v: rs.reduce((a, r) => a + fn(r), 0), n: rs.length };
       }).filter((b) => b.n > 0);
-      const sunBars = totals("irradiance", (r) => (fin(r.mean) ?? 0) * 0.024);
+      const sunBars = totals("irradiance", (r) => (r.d === m.sod ? m.sun.kwh ?? 0 : (fin(r.mean) ?? 0) * 0.024));
       const rainBars = totals("precipitation", (r) => Math.max(0, fin(r.change) ?? 0));
       const boltBars = totals("lightning_count", (r) => Math.max(0, fin(r.change) ?? 0));
       const nDays = tMean.length;
@@ -1574,7 +1611,7 @@ tr.fc td { color: var(--wx-ink2); }
           head: () => { const g = top(wBand, "hi", 1);
             return readout(wMean.length ? f.num(mean(wMean.map((p) => p.v)), 1) : "—", wMean.length ? su : "", g ? `Gusts to ${f.num(g.hi, 1)}, ${f.date(g.d)}` : "Collecting"); },
           at: lineAt(wMean, wBand, (v) => f.num(v, 1), su) },
-        { key: "pres", name: "Avg pressure", qual: "", bandLabel: "daily range", kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, pu === "inHg" ? 2 : 0), minSpan: hpaIn(20, pu), empty: enough ? null : waiting,
+        { key: "pres", name: "Avg pressure", qual: "", bandLabel: "daily range", kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, presDp(pu) - 1), minSpan: hpaIn(20, pu), empty: enough ? null : waiting,
           lines: [{ key: "p", color: "var(--wx-pres)", pts: pMean, band: pBand }],
           head: () => { const lo = top(pBand, "lo", -1), hi = top(pBand, "hi", 1);
             return readout(pMean.length ? f.num(mean(pMean.map((p) => p.v)), pdp) : "—", pMean.length ? pu : "", lo && hi ? `Range ${span2(f.num(lo.lo, pdp), f.num(hi.hi, pdp))}` : "Collecting"); },
@@ -1599,10 +1636,10 @@ tr.fc td { color: var(--wx-ink2); }
           at: barAt(boltBars, "strikes", (v) => f.num(v)) },
       ];
       return {
-        range: "months", title: "Last 12 months", x0, x1, now: null, marker: null, step: DAY, bigStep: 30 * DAY, loading: !this._long?.months,
+        range: "months", title: "Last 12 months", x0, x1, marker: null, step: DAY, bigStep: 30 * DAY, loading: !this._long?.months, failed: this._long?.months?.error,
         snap: (t) => { const d = dayIdx(t); return d === null ? t : mid(d); }, strips,
         when: (t) => { const d = dayIdx(t); return d === null ? "" : `${f.weekday(d)}, ${f.date(d)}`; },
-        axis: { kind: "months", months },
+        months,
         table: () => ({
           head: ["Day", "High", "Low", "Average", `Wind (${su})`, `Gust (${su})`, `Pressure (${pu})`, "Humidity (%)"],
           rows: tMean.slice().reverse().map((p) => {
@@ -1630,12 +1667,12 @@ tr.fc td { color: var(--wx-ink2); }
       const enough = new Set(recorded.map((r) => r.y * 12 + r.mo)).size >= 2, multi = years.length > 1;
       const NOM = 2001, x0 = Date.UTC(NOM, 0, 1), x1 = Date.UTC(NOM + 1, 0, 1);
       const startOf = (mo) => Date.UTC(NOM, mo, 1), midOf = (mo) => Date.UTC(NOM, mo, 15), endOf = (mo) => Date.UTC(NOM, mo + 1, 1) - 1;
-      const todayNom = Date.UTC(NOM, thisMonth, Math.min(28, today));
+      const todayNom = Date.UTC(NOM, thisMonth, Math.min(new Date(Date.UTC(NOM, thisMonth + 1, 0)).getUTCDate(), today));
       // This month is still running: its average sits in the middle of the days so far, its running total at today.
       const midAt = (y, mo) => (y === thisYear && mo === thisMonth ? (startOf(mo) + todayNom) / 2 : midOf(mo));
       const endAt = (y, mo) => (y === thisYear && mo === thisMonth ? todayNom : endOf(mo));
       const su = m.wind.unit, pu = m.pres.unit, ru = m.rain.unit;
-      const pdp = pu === "inHg" ? 2 : 1, rdp = ru === "in" ? 2 : 1;
+      const pdp = presDp(pu), rdp = ru === "in" ? 2 : 1;
       const fin = (v) => (Number.isFinite(v) ? v : null);
       const daysIn = (y, mo) => new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
       const monthName = (mo) => new Intl.DateTimeFormat(f.lang, { month: "long", timeZone: "UTC" }).format(Date.UTC(NOM, mo, 15));
@@ -1701,14 +1738,14 @@ tr.fc td { color: var(--wx-ink2); }
       };
       const empty = enough ? null : first ? `Monthly history began in ${monthName(first.mo)} ${first.y}; lines start in ${monthName((first.mo + 1) % 12)}` : "No monthly history recorded yet";
       const qMean = multi ? String(thisYear) : "", qSum = multi ? String(thisYear) : "";
-      const degF = (v) => `${f.num(v, 1)}°`;
+      const deg1 = (v) => `${f.num(v, 1)}°`;
       const numF = (dp) => (v) => f.num(v, dp);
       const strips = [
         { key: "temp", name: "Avg temperature", qual: qMean, kind: "lines", h: 136, w: 2.3, min: 80, yFmt: (v) => `${f.num(v)}°`, minSpan: 10, empty,
-          lines: lines(temp, "var(--wx-temp)"), head: headOf(temp, "mean", degF, "", ["warmer", "cooler"]), at: atOf(temp, degF, "") },
+          lines: lines(temp, "var(--wx-temp)"), head: headOf(temp, "mean", deg1, "", ["warmer", "cooler"]), at: atOf(temp, deg1, "") },
         { key: "wind", name: "Avg wind", qual: qMean, kind: "lines", h: 88, w: 1.5, min: 56, yFmt: (v) => f.num(v), yMin: 0, minSpan: 5, empty,
           lines: lines(wind, "var(--wx-wind)"), head: headOf(wind, "mean", numF(1), su, ["windier", "calmer"]), at: atOf(wind, numF(1), su) },
-        { key: "pres", name: "Avg pressure", qual: qMean, kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, pu === "inHg" ? 2 : 0), minSpan: hpaIn(10, pu), empty,
+        { key: "pres", name: "Avg pressure", qual: qMean, kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => f.num(v, presDp(pu) - 1), minSpan: hpaIn(10, pu), empty,
           lines: lines(pres, "var(--wx-pres)"), head: headOf(pres, "mean", numF(pdp), pu, ["higher", "lower"]), at: atOf(pres, numF(pdp), pu) },
         { key: "rh", name: "Avg humidity", qual: qMean, kind: "lines", h: 64, w: 1, min: 56, yFmt: (v) => `${f.num(v)}%`, yMin: 0, yMax: 100, empty,
           lines: lines(rh, "var(--wx-dew)"), head: headOf(rh, "mean", numF(0), "%", ["higher", "lower"]), at: atOf(rh, numF(0), "%") },
@@ -1721,10 +1758,10 @@ tr.fc td { color: var(--wx-ink2); }
       ];
       const title = !enough ? "Year by year" : multi ? `${years[years.length - 1]} to ${thisYear}, year by year` : first.mo > 0 ? `Since ${monthName(first.mo)} ${first.y}` : `${thisYear} so far`;
       return {
-        range: "years", title, x0, x1, now: null,
-        marker: todayNom, markerLabel: "Today", step: 30 * DAY, bigStep: 90 * DAY, loading: !this._long?.years,
+        range: "years", title, x0, x1,
+        marker: todayNom, markerLabel: "Today", step: 30 * DAY, bigStep: 90 * DAY, loading: !this._long?.years, failed: this._long?.years?.error,
         snap: (t) => midAt(thisYear, new Date(Math.max(x0, Math.min(x1 - 1, t))).getUTCMonth()), strips,
-        when: (t) => monthName(new Date(t).getUTCMonth()), axis: { kind: "year" },
+        when: (t) => monthName(new Date(t).getUTCMonth()),
         table: () => {
           const ym = [...new Set(rows("temperature").map((r) => `${r.y}-${r.mo}`))].map((s) => s.split("-").map(Number)).sort((a, b) => b[0] - a[0] || b[1] - a[1]);
           const get = (k, y, mo) => rows(k).find((r) => r.y === y && r.mo === mo);
@@ -1747,16 +1784,16 @@ tr.fc td { color: var(--wx-ink2); }
       if ((range !== "months" && range !== "years") || !this._hass || !this._ents) return;
       this._long = this._long ?? {};
       const slot = this._long[range];
-      if ((slot && Date.now() - slot.at < 6 * HOUR) || this._longPending?.[range]) return;
+      if ((slot && Date.now() - slot.at < (slot.error ? 5 * 60e3 : 6 * HOUR)) || this._longPending?.[range]) return;
       (this._longPending = this._longPending ?? {})[range] = true;
       const f = this._fmt(), now = Date.now();
       try {
-        const start = range === "months" ? f.startOfDay(f.startOfDay(now) - 365 * DAY + 12 * HOUR) : Date.UTC(f.parts(now).year - 9, 0, 1);
+        const start = range === "months" ? f.startOfDay(f.startOfDay(now) - 365 * DAY + 12 * HOUR) : f.startOfDay(Date.UTC(f.parts(now).year - 5, 0, 1) + 12 * HOUR);
         const data = await this._hass.callWS({ type: "recorder/statistics_during_period", start_time: new Date(start).toISOString(),
-          statistic_ids: DAILY_KEYS.map((k) => this._ents[k]), period: range === "months" ? "day" : "month", types: ["mean", "min", "max", "change"] });
+          statistic_ids: LONG_KEYS.map((k) => this._ents[k]), period: range === "months" ? "day" : "month", types: ["mean", "min", "max", "change"] });
         this._long[range] = { data: data ?? {}, at: Date.now() };
       } catch (e) {
-        this._error = e?.message ?? String(e);
+        this._long[range] = { data: {}, at: Date.now(), error: e?.message ?? String(e) };
       }
       this._longPending[range] = false;
       if (this._range === range) this._renderAll();
@@ -1811,7 +1848,7 @@ tr.fc td { color: var(--wx-ink2); }
       this._mgFocus = this._mgFocus || !!this._root.activeElement?.classList?.contains("mg");
       if (this._table) { this._mgFocus = false; this._mgHold = null; this._redrawing = true; host.innerHTML = this._tableHtml(spec); this._redrawing = false; return; }
       const narrow = this._mode === "narrow", wide = this._mode === "wide";
-      const tileW = narrow ? 0 : this._tight ? 168 : 184;
+      const tileW = this._tileW();
       const W = Math.max(240, host.clientWidth - tileW);
       const longest = Math.max(0, ...spec.strips.filter((s) => !s.empty && s.yFmt).flatMap((s) => {
         const vals = s.kind === "range" ? s.ranges.flatMap((r) => [r.lo, r.hi]) : s.kind === "lines" ? s.lines.flatMap((l) => l.pts.map((q) => q.v)) : [];
@@ -1824,14 +1861,13 @@ tr.fc td { color: var(--wx-ink2); }
       const n = spec.strips.length;
       const heights = this._allocate(spec.strips, wide ? host.clientHeight - axisH - gap * n : null, narrow);
       // One headline size per column: 32 px only when every strip with data has room for it, else 24 px for all.
-      this._tier = narrow ? "full" : !this._tight && spec.strips.every((st, k) => st.empty || heights[k] >= 56) ? "full" : "m";
+      this._headlineTier = narrow ? "full" : !this._tight && spec.strips.every((st, k) => st.empty || heights[k] >= 56) ? "full" : "m";
       const markX = spec.marker !== null && spec.marker !== undefined ? sx(spec.marker) : null;
       this._mgGeom = { spec, sx, padL, pw, strips: [] };
 
       const bandSeen = new Set();
-      const rows = spec.strips.map((s0, si) => {
+      const rows = spec.strips.map((s, si) => {
         const H = heights[si];
-        const s = this._namedLines(s0, H, narrow);
         const padT = 12, padB = s.kind === "lines" || s.kind === "range" ? 8 : 0, ph = H - padT - padB;
         let g = "";
         if (spec.wash) g += `<rect x="${sx(spec.wash[0]).toFixed(1)}" y="0" width="${(sx(spec.wash[1]) - sx(spec.wash[0])).toFixed(1)}" height="${H}" fill="var(--wx-wash)"/>`;
@@ -1841,37 +1877,34 @@ tr.fc td { color: var(--wx-ink2); }
           g += `<line data-xh x1="0" x2="0" y1="0" y2="${H}" stroke="var(--wx-ink2)" visibility="hidden"/>`;
           this._mgGeom.strips.push(geom);
           const repeat = si > 0 && spec.strips[si - 1].empty === s.empty;
-          const msg = spec.loading ? (si === 0 ? "Loading history…" : "") : repeat ? "" : s.empty;
+          const msg = spec.failed ? (si === 0 ? "History unavailable: the recorder's statistics could not be read" : "") : spec.loading ? (si === 0 ? "Loading history…" : "") : repeat ? "" : s.empty;
           return { s, H, svg: `<svg width="${W}" height="${H}" aria-hidden="true">${g}</svg>${msg ? `<div class="mg-none small" style="left:${padL + 8}px">${esc(msg)}</div>` : ""}` };
         }
         const label = (v, y) => `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="tick">${esc(v)}</text>`;
         const grid = (y) => `<line x1="${padL}" x2="${padL + pw}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--wx-grid)"/>`;
         if (s.kind === "bars") {
-          // Headroom over the tallest bar for its label; one labelled tick, the largest that fits.
+          // Air over the tallest bar; one labelled tick, the largest that fits.
           const vmax = Math.max(...s.bars.map((b) => b.v), 0) || 1;
           const top = vmax * 1.12;
           const nt = niceTicks(0, vmax, 2);
           const tick = nt.ticks.filter((v) => v > 0 && v <= top).pop() ?? nt.ticks[1] ?? vmax;
           const sy = (v) => padT + ph - (v / top) * ph;
           if (H >= 52) g += grid(sy(tick)) + label(f.num(tick, nt.step < 0.1 ? 2 : nt.step < 1 ? 1 : 0), sy(tick));
-          let peak = null;
           s.bars.forEach((b, i) => {
             const slot = sx(b.t1) - sx(b.t0), bw = Math.max(2, Math.min(24, slot - 2));
             const x = sx(b.t0) + (slot - bw) / 2, y = sy(b.v);
             g += `<path data-bar="${i}" d="${barPath(x, y, bw, padT + ph - y)}" fill="${b.fc ? "var(--wx-muted)" : s.color}"${b.fc ? ' fill-opacity="0.5"' : ""}/>`;
-            if (!b.fc && b.v > 0 && (!peak || b.v > peak.v)) peak = { v: b.v, x: x + bw / 2, y };
           });
           geom.sy = sy;
         } else {
-          // Fit the data with a little air (more where an extreme carries a label); ticks fall where they fall inside.
+          // Fit the data with a little air above and below; ticks fall where they fall inside.
           const vals = [];
           if (s.kind === "range") for (const r of s.ranges) vals.push(r.lo, r.hi);
           else for (const ln of s.lines) {
-            for (const p of ln.pts) if (p.t >= x0 && p.t <= x1 && !ln.model) vals.push(p.v);
+            for (const p of ln.pts) if (p.t >= x0 && p.t <= x1) vals.push(p.v);
             for (const b of ln.band ?? []) if (b.t >= x0) vals.push(b.lo, b.hi);
           }
           let lo = s.yMin ?? (vals.length ? Math.min(...vals) : 0), hi = s.yMax ?? (vals.length ? Math.max(...vals) : 1);
-          if (s.key === "sun" && s.kind === "lines" && spec.range === "hours") hi = Math.max(hi, ...s.lines[0].pts.map((p) => p.v));
           if (s.minSpan && hi - lo < s.minSpan) { const md = (hi + lo) / 2; lo = s.yMin ?? md - s.minSpan / 2; hi = lo + s.minSpan; }
           const span = hi - lo || 1;
           const y0 = s.yMin ?? lo - span * 0.06, y1 = s.yMax ?? hi + span * 0.1;
@@ -1916,12 +1949,11 @@ tr.fc td { color: var(--wx-ink2); }
                   g += `<text x="${(lx - 4).toFixed(1)}" y="${Math.max(11, top - 5).toFixed(1)}" text-anchor="end" class="tick halo">${esc(s.bandLabel)}</text>`;
                 }
               }
-              if (ln.area) g += `<path d="${areaPath(pts, sx, sy, padT + ph, gapMs)}" fill="${ln.color}" fill-opacity="0.12"/>`;
               const width = ln.width ?? (ln.dot ? 2.25 : ln.light ? 1.25 : ln.dash ? 1.5 : 2);
               const op = ln.opacity ?? 1;
               g += `<path d="${linePath(pts, sx, sy, ln.dash ? 2 * (spec.range === "hours" ? HOUR : DAY) : gapMs)}" fill="none" stroke="${ln.color}" stroke-width="${width}"${op < 1 ? ` stroke-opacity="${op}"` : ""} stroke-linejoin="round" stroke-linecap="round"${ln.dash ? ' stroke-dasharray="4 4"' : ln.dot ? ' stroke-dasharray="0.01 4.5"' : ""}/>`;
               const e = pts[pts.length - 1];
-              if (!ln.dash && !ln.model && !ln.light && (ln.year === undefined || ln.opacity === 1) && pts.length < 400) {
+              if (!ln.dash && !ln.light && (ln.year === undefined || ln.opacity === 1) && pts.length < 400) {
                 g += `<circle cx="${sx(e.t).toFixed(1)}" cy="${sy(e.v).toFixed(1)}" r="${spec.range === "hours" ? 4 : 3}" fill="${ln.color}" stroke="var(--wx-surface)" stroke-width="2"/>`;
               }
               // Years label their lines at the end: this year always, the year before when it has room; the rest live in the tile and table.
@@ -1929,16 +1961,18 @@ tr.fc td { color: var(--wx-ink2); }
                 const b = box(e);
                 if (ln.opacity === 1 || !yearLabels.some((o) => meets(o, b))) {
                   if (ln.opacity !== 1) yearLabels.push(b);
-                  g += `<text x="${(b.right ? b.x : b.x + 30).toFixed(1)}" y="${b.y.toFixed(1)}" text-anchor="${b.right ? "start" : "end"}" class="${ln.opacity === 1 ? "ext" : "tick"}">${esc(ln.endLabel)}</text>`;
+                  g += `<text x="${(b.right ? b.x : b.x + 30).toFixed(1)}" y="${b.y.toFixed(1)}" text-anchor="${b.right ? "start" : "end"}" class="${ln.opacity === 1 ? "yearlabel" : "tick"}">${esc(ln.endLabel)}</text>`;
                 }
               }
             }
             // Secondary lines name themselves where they end, just past their last reading; crowded names step apart.
-            const ends = s.lines.filter((ln) => ln.endName && ln.pts.length).map((ln) => ({ x: sx(ln.pts[ln.pts.length - 1].t) + 8, y: sy(ln.pts[ln.pts.length - 1].v) + 4, text: ln.endName }))
-              .filter((l) => l.x + 84 <= padL + pw).sort((a, b) => a.y - b.y);
+            // Where the right side is too narrow for them (a phone), they sit to the left of the line's end on their halo.
+            const room = (x) => x + 8 + 84 <= padL + pw;
+            const ends = s.lines.filter((ln) => ln.endName && ln.pts.length).map((ln) => { const e = ln.pts[ln.pts.length - 1], x = sx(e.t); return { x: room(x) ? x + 8 : x - 8, right: room(x), y: sy(e.v) + 4, text: ln.endName }; })
+              .sort((a, b) => a.y - b.y);
             for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 13);
             const over = ends.length ? ends[ends.length - 1].y - (padT + ph + 2) : 0;
-            for (const l of ends) g += `<text x="${l.x.toFixed(1)}" y="${(l.y - Math.max(0, over)).toFixed(1)}" class="tick halo">${esc(l.text)}</text>`;
+            for (const l of ends) g += `<text x="${l.x.toFixed(1)}" y="${(l.y - Math.max(0, over)).toFixed(1)}" text-anchor="${l.right ? "start" : "end"}" class="tick halo">${esc(l.text)}</text>`;
           }
           geom.sy = sy;
         }
@@ -1972,7 +2006,7 @@ tr.fc td { color: var(--wx-ink2); }
       const clear = (x) => x >= padL + 14 && x <= padL + pw - 14 && (markX === null || Math.abs(x - markX) >= 34);
       if (spec.range === "hours") {
         const every = pw / ((spec.x1 - spec.x0) / HOUR) < 14 ? 12 : 6;
-        for (let t = Math.ceil(spec.x0 / HOUR) * HOUR; t <= spec.x1; t += HOUR) {
+        for (let t = f.startOfHour(spec.x0 + HOUR - 1); t <= spec.x1; t += HOUR) {
           const h = f.parts(t).hour;
           if (h % every || !clear(sx(t))) continue;
           put(sx(t), h === 0 ? f.weekday(t) : f.hour(t), h === 0);
@@ -1987,9 +2021,9 @@ tr.fc td { color: var(--wx-ink2); }
       } else if (spec.range === "months") {
         const short = new Intl.DateTimeFormat(f.lang, { timeZone: f.tz, month: "short" });
         const every = pw / 12 < 40 ? 2 : 1;
-        spec.axis.months.forEach((mo, i) => {
+        spec.months.forEach((mo, i) => {
           const x = sx(mo.t0 + (mo.t1 - mo.t0) / 2);
-          if ((spec.axis.months.length - 1 - i) % every || x < padL + 10 || x > padL + pw - 10) return;
+          if ((spec.months.length - 1 - i) % every || x < padL + 10 || x > padL + pw - 10) return;
           put(x, mo.mo === 1 ? String(mo.y) : short.format(mo.t0), mo.mo === 1);
         });
       } else {
@@ -2000,27 +2034,18 @@ tr.fc td { color: var(--wx-ink2); }
       return out.join("");
     }
 
-    // How many lines a tile has under its headline: what its height allows, or on a phone, one per legend.
+    // How many lines a tile has under its headline: what its height allows; on a phone, one.
     _slots(s, H, narrow) {
-      if (narrow) return s.empty ? 0 : (s.head?.().lines ?? []).filter((l) => l.color).length;
-      const base = this._tier === "full" ? 56 : 46;
+      if (narrow) return s.empty ? 0 : 1;
+      const base = this._headlineTier === "full" ? 56 : 46;
       return H >= base ? Math.max(0, Math.floor((H - base) / 18)) : 0;
-    }
-
-    // A strip draws only the series its tile can name: a keyed line whose legend has no room stays off the chart.
-    _namedLines(s, H, narrow) {
-      if (s.empty || !s.lines || !s.head) return s;
-      const v = s.head(), keyed = (v.lines ?? []).map((l) => l.line).filter(Boolean);
-      if (!keyed.length) return s;
-      const shown = new Set(fitLines(v, this._slots(s, H, narrow)).map((l) => l.line).filter(Boolean));
-      return { ...s, lines: s.lines.filter((ln) => !keyed.includes(ln.key) || shown.has(ln.key)) };
     }
 
     // The tile: the strip's name, its headline at readout size, what the headline is, and companions as room allows.
     _tileHtml(r, narrow) {
       const s = r.s;
       if (s.empty && !s.zero) return `<div class="tile" style="${narrow ? "" : `height:${r.H}px`}"><div class="small tn">${esc(s.name)}</div></div>`;
-      const size = narrow ? "" : s.empty ? " s" : this._tier === "full" ? "" : r.H >= 46 ? " m" : " s";
+      const size = narrow ? "" : s.empty ? " s" : this._headlineTier === "full" ? "" : r.H >= 46 ? " m" : " s";
       const extra = size === " s" ? 0 : this._slots(s, r.H, narrow);
       return `<div class="tile${size}" style="${narrow ? "" : `height:${r.H}px`}">
         <div class="small tn">${esc(s.name)}<span data-tq="${s.key}">${s.qual ? ` · ${esc(s.qual)}` : ""}</span></div>
@@ -2070,7 +2095,7 @@ tr.fc td { color: var(--wx-ink2); }
           svg.querySelectorAll("[data-bar]").forEach((p) => { const t0 = Number(p.dataset.bar); p.setAttribute("opacity", t >= t0 && t < t0 + DAY ? "1" : "0.45"); });
         } else if (dots && geom.sy) {
           const tol = spec.range === "hours" ? 8 * 60e3 : spec.range === "years" ? 20 * DAY : 2 * HOUR;
-          dots.innerHTML = s.lines.filter((l) => !l.model && !l.light && !l.draw && (l.opacity ?? 1) === 1).map((l) => {
+          dots.innerHTML = s.lines.filter((l) => !l.light && !l.draw && (l.opacity ?? 1) === 1).map((l) => {
             const p = nearest(l.pts, t, l.dash ? 40 * 60e3 : tol);
             return p ? `<circle cx="${G.sx(p.t).toFixed(1)}" cy="${geom.sy(p.v).toFixed(1)}" r="4" fill="${l.color}" stroke="var(--wx-surface)" stroke-width="2"/>` : "";
           }).join("");
@@ -2135,6 +2160,19 @@ tr.fc td { color: var(--wx-ink2); }
       }</tbody></table></div>`;
     }
 
+    // The table as a file: the rows as shown, with the display's thin spaces, minus signs and dashes turned back into ASCII.
+    _downloadCsv() {
+      const spec = this._mgSpec, t = spec?.table?.();
+      if (!t?.rows.length) return;
+      const cell = (c) => { const v = String(c).replace(/\u00a0/g, " ").replace(/\u2212/g, "-").replace(/\u2014/g, ""); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+      const csv = [t.head, ...t.rows.map((r) => r.cells)].map((r) => r.map(cell).join(",")).join("\n");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
+      a.download = `${this._slug}-${spec.range}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+
     /* ----- live values ----- */
 
     _applyLive(m = null) {
@@ -2159,7 +2197,7 @@ tr.fc td { color: var(--wx-ink2); }
       set("lede", m.lede);
       this._reserveLede();
       set("ws", f.num(W.v, 1));
-      set("wfrom", W.card); set("wdeg", `${f.num(W.dir)}°`);
+      set("wfrom", W.card); set("wdeg", W.dir === null ? "" : `${f.num(W.dir)}°`);
       set("gustlull", W.gust === null ? "" : `Gusts ${f.num(W.gust, 1)}, lulls ${f.num(W.lull, 1)}${NB}${W.unit}`);
       set("rosecap", W.roseSpan > 0
         ? `Red arrow: blowing toward. Ring: last 10${NB}min. Petals: ${W.roseSpan > 23.5 * HOUR ? `last 24${NB}h` : `since ${f.time(m.now - W.roseSpan)}`}.`
@@ -2168,11 +2206,11 @@ tr.fc td { color: var(--wx-ink2); }
       set("daylen", Sn.rise && Sn.set ? `${f.dur(Sn.set - Sn.rise)} of daylight` : "");
       set("irr", f.num(Sn.irr));
       set("sunline1", Sn.el > 0 && Sn.pct !== null ? `${f.num(Math.min(Sn.pct, 1.5) * 100)}% of a clear sky` : "");
-      set("sunenergy", `${f.num(Sn.kwh, 1)}${NB}kWh/m² today`);
+      set("sunenergy", Sn.kwh === null ? "" : `${f.num(Sn.kwh, 1)}${NB}kWh/m² today`);
       set("sunline2", Sn.next ? `${Sn.next.word} ${f.time(Sn.next.t)}, in ${f.dur(Sn.next.t - m.now)}` : "");
       if (W.bf) { set("bf-v", W.bf.word); set("bf-n", `force ${W.bf.i}`); }
       if (m.pres.tend) { set("tend-v", m.pres.tend.word); set("tend-n", tendIn(f, m.pres.tend.dHpa, m.pres.unit).text); }
-      else set("tend-n", f.dur(m.pres.have));
+      else set("tend-n", m.pres.have >= 60e3 ? f.dur(m.pres.have) : "");
       if (m.moist.comfort) { set("comfort-v", m.moist.comfort.word); set("comfort-n", `${f.num(m.moist.dew, 1)}°`); }
       if (m.sun.uvs) { set("uv-v", m.sun.uvs.word); set("uv-n", f.num(m.sun.uv, 1)); }
       if (m.rain.rs) set("rate-n", `${f.num(m.rain.rate, m.rain.unit === "in" ? 2 : 1)}${NB}${m.rain.rateUnit}`);
@@ -2204,6 +2242,7 @@ tr.fc td { color: var(--wx-ink2); }
           this._needleAngle = next;
           g.style.transform = `rotate(${next.toFixed(1)}deg)`;
         }
+        g.classList.toggle("calm", !!W.bf && W.bf.i === 0);
       }
       this._root.querySelectorAll("[data-ring]").forEach((seg, i) => {
         const v = W.ring ? W.ring[i] : 0, o = v < 0.04 ? "0" : (0.12 + 0.5 * v).toFixed(2);
@@ -2217,12 +2256,13 @@ tr.fc td { color: var(--wx-ink2); }
       const dev = this._slug.replace(/^st_/, "ST-").toUpperCase();
       return [`Tempest ${dev}`, St.obs ? `reported ${f.ago(m.now - St.obs)}` : "",
         St.bv === null ? "" : `battery ${f.num(St.bv, 2)} V, ${St.mode === 0 ? POWER[0].label : St.mode === 0.5 ? "near power save" : POWER[Math.floor(St.mode)].label}`,
-        St.since ? `recording since ${f.date(St.since)}, ${f.time(St.since)}` : ""].filter(Boolean).join(" · ");
+        ].filter(Boolean).join(" · ");
     }
   }
 
   customElements.define(TAG, TempestStationCard);
   window.customCards = window.customCards || [];
-  window.customCards.push({ type: TAG, name: "Tempest weather station", description: "Live readings, a meteogram and context for a WeatherFlow Tempest.", preview: false });
+  window.customCards.push({ type: TAG, name: "Tempest Station Card", description: "A WeatherFlow Tempest station: the reading now in plain words, wind and sun, and a meteogram from hours to years.",
+    preview: false, documentationURL: "https://github.com/Treehouse-00/tempest-station-card" });
   console.info(`%c${TAG} ${VERSION}`, "color:#898781");
 })();
