@@ -36,7 +36,7 @@
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.1.1";
+  const VERSION = "1.2.0";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -142,7 +142,7 @@
 
   // The longest sentence the Now column can write, every clause in its longest words: the sentence's box is always this
   // tall at the current width, so no change of wording, however big, can move what sits below it.
-  const LEDE_LONGEST = "Very hot and oppressive this afternoon, warming 10.5° an hour. Moderate breeze from the north\u2011northwest. Pressure falling very rapidly. 12.34 inches of rain today.";
+  const LEDE_LONGEST = "Very hot and oppressive this afternoon, warming 10.5° an hour. Moderate breeze from the north\u2011northwest. Pressure falling very rapidly. Heavy rain and hail now.";
   const tempWord = (f) => (f <= 32 ? "Freezing" : f < 50 ? "Cold" : f < 60 ? "Cool" : f < 70 ? "Mild" : f < 80 ? "Warm" : f < 90 ? "Hot" : "Very hot");
 
   /* ---------- sun ---------- */
@@ -906,24 +906,31 @@ tr.fc td { color: var(--wx-ink2); }
       return m;
     }
 
+    // One short paragraph that says what it is like outside, the way a person would: the feel of the air first,
+    // placed in the day ("cool, dry and still tonight"), then the wind, the pressure and the rain. Nothing here
+    // repeats an alert or a scale beneath it; the sun's next moment belongs to the Sun instrument.
     _lede(m) {
-      const out = [];
-      if (m.temp.v !== null) {
-        const moist = m.moist.comfort ? ["dry", "sticky", "oppressive"][m.moist.comfort.i] : "";
-        const tr = m.temp.trend;
-        const trend = tr !== null && Math.abs(tr) >= 1 ? `, ${tr < 0 ? "cooling" : "warming"} ${m.f.num(Math.abs(tr), 1)}° an hour` : "";
-        const h = m.f.parts(m.now).hour;
-        const when = h < 5 ? "tonight" : h < 12 ? "this morning" : h < 17 ? "this afternoon" : h < 21 ? "this evening" : "tonight";
-        out.push(`${m.temp.word}${moist ? ` and ${moist}` : ""} ${when}${trend}.`);
-      }
+      const f = m.f, out = [];
       const ws = m.wind.avg ?? m.wind.v, wd = this._num("wind_direction_average") ?? m.wind.dir;
       const bf = ws === null ? null : beaufort(SPEED.to(ws, m.wind.unit));
-      if (bf) out.push(bf.i === 0 ? "Calm." : wd === null ? `${bf.word}.` : `${bf.word} from the ${CARD16_WORDS[sector16(wd)]}.`);
-      if (m.pres.tend) out.push(`Pressure ${m.pres.tend.word.toLowerCase()}.`);
+      const raining = !!(m.rain.rs && m.rain.rs.i > 0);
+      if (m.temp.v !== null) {
+        const h = f.parts(m.now).hour;
+        const when = h < 5 ? "tonight" : h < 12 ? "this morning" : h < 17 ? "this afternoon" : h < 21 ? "this evening" : "tonight";
+        // The comfort word is about the air's moisture; in rain it would read as a contradiction.
+        const adj = [m.temp.word.toLowerCase(), !raining && m.moist.comfort ? ["dry", "sticky", "oppressive"][m.moist.comfort.i] : null, bf && bf.i === 0 ? "still" : null].filter(Boolean);
+        const feel = adj.length > 1 ? `${adj.slice(0, -1).join(", ")} and ${adj[adj.length - 1]}` : adj[0];
+        const tr = m.temp.trend;
+        const trend = tr !== null && Math.abs(tr) >= 1 ? `, ${tr < 0 ? "cooling" : "warming"} ${f.num(Math.abs(tr), 1)}° an hour` : "";
+        out.push(`${feel[0].toUpperCase()}${feel.slice(1)} ${when}${trend}.`);
+      }
+      if (bf && bf.i > 0) out.push(wd === null ? `${bf.word}.` : `${bf.word} from the ${CARD16_WORDS[sector16(wd)]}.`);
+      else if (bf && m.temp.v === null) out.push("Calm.");
+      if (m.pres.tend && m.pres.tend.i !== 4) out.push(`Pressure ${m.pres.tend.word.toLowerCase()}.`);
       const dp = m.rain.unit === "in" ? 2 : 1;
-      if (m.rain.rs && m.rain.rs.i > 0) out.push(`${m.rain.rs.word} ${m.rain.type ?? "rain"} now.`);
+      if (raining) out.push(`${m.rain.rs.word} ${m.rain.type ?? "rain"} now.`);
       else if (m.rain.today > 0) {
-        const amt = m.f.num(m.rain.today, dp), word = DEPTH_WORDS[m.rain.unit]?.[Number(amt) === 1 ? 0 : 1] ?? m.rain.unit;
+        const amt = f.num(m.rain.today, dp), word = DEPTH_WORDS[m.rain.unit]?.[Number(amt) === 1 ? 0 : 1] ?? m.rain.unit;
         out.push(`${amt}${NB}${word} of rain today.`);
       }
       else if (m.rain.today === 0) out.push("No rain today.");
@@ -1000,7 +1007,7 @@ tr.fc td { color: var(--wx-ink2); }
       this._body.classList.remove("dense");
       this._reserveLede();
       const col = this._root.querySelector(".col-now");
-      if (this._mode === "wide" && col && col.scrollHeight > col.clientHeight) this._body.classList.add("dense");
+      if (this._mode === "wide" && col && col.scrollHeight > col.clientHeight) { this._body.classList.add("dense"); this._reserveLede(); }
       this._needleAngle = undefined;
       this._drawCharts();
       this._applyLive(m);
@@ -1014,6 +1021,7 @@ tr.fc td { color: var(--wx-ink2); }
     _reserveLede() {
       const lede = this._root?.querySelector('[data-k="lede"]');
       if (!lede?.clientWidth) return;
+      if (this._body.classList.contains("dense")) { lede.style.minHeight = ""; return; }
       if (lede.clientWidth !== this._ledeW) {
         const probe = lede.cloneNode(false);
         probe.removeAttribute("data-k");
@@ -1060,7 +1068,7 @@ tr.fc td { color: var(--wx-ink2); }
       this._body.classList.remove("dense");
       this._reserveLede();
       const now = this._root.querySelector(".col-now");
-      if (this._mode === "wide" && now && now.scrollHeight > now.clientHeight) this._body.classList.add("dense");
+      if (this._mode === "wide" && now && now.scrollHeight > now.clientHeight) { this._body.classList.add("dense"); this._reserveLede(); }
       this._applyLive(m);
       if (now?.querySelector(".top")?.offsetHeight !== before) this._drawCharts();
     }
@@ -2215,9 +2223,11 @@ tr.fc td { color: var(--wx-ink2); }
       const Sn = m.sun;
       set("daylen", Sn.rise && Sn.set ? `${f.dur(Sn.set - Sn.rise)} of daylight` : "");
       set("irr", f.num(Sn.irr));
-      set("sunline1", Sn.el > 0 && Sn.pct !== null ? `${f.num(Math.min(Sn.pct, 1.5) * 100)}% of a clear sky` : "");
+      // By the sun's height: civil twilight is dawn or dusk, the first six degrees are golden hour, above ten the sky's clarity.
+      const pm = f.parts(m.now).hour >= 12;
+      set("sunline1", Sn.el > 10 && Sn.pct !== null ? `${f.num(Math.min(Sn.pct, 1.5) * 100)}% of a clear sky` : Sn.el > 6 ? "" : Sn.el > 0 ? "Golden hour" : Sn.el > -6 ? (pm ? "Dusk" : "Dawn") : "");
       set("sunenergy", Sn.kwh === null ? "" : `${f.num(Sn.kwh, 1)}${NB}kWh/m² today`);
-      set("sunline2", Sn.next ? `${Sn.next.word} ${f.time(Sn.next.t)}, in ${f.dur(Sn.next.t - m.now)}` : "");
+      set("sunline2", !Sn.next ? "" : Sn.next.t - m.now <= 60 * 60e3 ? `${Sn.next.word === "Rises" ? "Sunrise" : "Sunset"} in ${f.dur(Sn.next.t - m.now)}, at ${f.time(Sn.next.t)}` : `${Sn.next.word} ${f.time(Sn.next.t)}, in ${f.dur(Sn.next.t - m.now)}`);
       if (W.bf) { set("bf-v", W.bf.word); set("bf-n", `force ${W.bf.i}`); }
       if (m.pres.tend) { set("tend-v", m.pres.tend.word); set("tend-n", tendIn(f, m.pres.tend.dHpa, m.pres.unit).text); }
       else set("tend-n", m.pres.have >= 60e3 ? f.dur(m.pres.have) : "");

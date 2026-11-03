@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+- **The sentence speaks like a person.** "Cool, dry and still tonight" instead of "Cool and dry tonight. Calm."; it stops calling the air dry while it rains; and it no longer reports a steady pressure, only one that is moving.
+- **The Sun instrument names its moments.** "Dawn" and "Dusk" through civil twilight, "Golden hour" while the sun is within six degrees of the horizon, and "Sunrise in 24 min, at 6:37 AM" when the moment is within the hour.
+
 ## 1.1.1
 
 - **The sentence knows the hour.** "Mild and sticky this afternoon", "Cool and dry tonight": the first clause places its reader in the day.

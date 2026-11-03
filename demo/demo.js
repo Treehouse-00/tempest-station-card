@@ -26,7 +26,7 @@
   if (width) document.querySelector("#stage").style.maxWidth = `${width}px`;
   for (const a of document.querySelectorAll("nav a")) {
     const u = new URL(a.href);
-    const here = [...u.searchParams].every(([k, v]) => (params.get(k) || { theme: "light", w: "", units: "", range: "", storm: "" }[k]) === v);
+    const here = [...u.searchParams].every(([k, v]) => (params.get(k) || { theme: "light", w: "", units: "", range: "", storm: "", at: "" }[k]) === v);
     if (here) a.setAttribute("aria-current", "true");
   }
 
