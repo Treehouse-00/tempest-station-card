@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- **The sentence knows the hour.** "Mild and sticky this afternoon", "Cool and dry tonight": the first clause places its reader in the day.
+- **A gentler first paint.** The charts, the dial and the headlines fade in over a third of a second when history first arrives, instead of popping in. Off when the system asks for reduced motion.
+
 ## 1.1.0
 
 - **Visual editor.** The card can be configured from the dashboard editor; every option has a field and a note.

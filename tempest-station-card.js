@@ -36,7 +36,7 @@
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.1.0";
+  const VERSION = "1.1.1";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -142,7 +142,7 @@
 
   // The longest sentence the Now column can write, every clause in its longest words: the sentence's box is always this
   // tall at the current width, so no change of wording, however big, can move what sits below it.
-  const LEDE_LONGEST = "Very hot and oppressive, warming 10.5° an hour. Moderate breeze from the north\u2011northwest. Pressure falling very rapidly. 12.34 inches of rain today.";
+  const LEDE_LONGEST = "Very hot and oppressive this afternoon, warming 10.5° an hour. Moderate breeze from the north\u2011northwest. Pressure falling very rapidly. 12.34 inches of rain today.";
   const tempWord = (f) => (f <= 32 ? "Freezing" : f < 50 ? "Cold" : f < 60 ? "Cool" : f < 70 ? "Mild" : f < 80 ? "Warm" : f < 90 ? "Hot" : "Very hot");
 
   /* ---------- sun ---------- */
@@ -522,6 +522,9 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .tile .k.dash { border-top-style: dashed; }
 .tile .k.dot { border-top-style: dotted; border-top-width: 2.5px; }
 .mg-p { min-width: 0; position: relative; border-radius: 8px; background: var(--wx-well); overflow: hidden; }
+@keyframes wx-arrive { from { opacity: 0; } to { opacity: 1; } }
+.arrive .mg-p svg, .arrive .sunfig svg, .arrive .dial svg, .arrive .tile .tv { animation: wx-arrive 360ms ease-out both; }
+@media (prefers-reduced-motion: reduce) { .arrive .mg-p svg, .arrive .sunfig svg, .arrive .dial svg, .arrive .tile .tv { animation: none; } }
 .mg-p svg, .mg-axis svg { display: block; overflow: visible; }
 .mg-axis { grid-column: 2; }
 .mg-key { grid-column: 1; padding: 6px 16px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -909,7 +912,9 @@ tr.fc td { color: var(--wx-ink2); }
         const moist = m.moist.comfort ? ["dry", "sticky", "oppressive"][m.moist.comfort.i] : "";
         const tr = m.temp.trend;
         const trend = tr !== null && Math.abs(tr) >= 1 ? `, ${tr < 0 ? "cooling" : "warming"} ${m.f.num(Math.abs(tr), 1)}° an hour` : "";
-        out.push(`${m.temp.word}${moist ? ` and ${moist}` : ""}${trend}.`);
+        const h = m.f.parts(m.now).hour;
+        const when = h < 5 ? "tonight" : h < 12 ? "this morning" : h < 17 ? "this afternoon" : h < 21 ? "this evening" : "tonight";
+        out.push(`${m.temp.word}${moist ? ` and ${moist}` : ""} ${when}${trend}.`);
       }
       const ws = m.wind.avg ?? m.wind.v, wd = this._num("wind_direction_average") ?? m.wind.dir;
       const bf = ws === null ? null : beaufort(SPEED.to(ws, m.wind.unit));
@@ -977,7 +982,7 @@ tr.fc td { color: var(--wx-ink2); }
       const changed = force || mode !== this._mode || tight !== this._tight || dialPref !== this._dialPref;
       if (changed) this._ledeW = 0;
       this._mode = mode; this._tight = tight; this._dialPref = dialPref;
-      this._body.className = `wrap ${mode}${tight ? " tight" : ""}`;
+      this._body.className = `wrap ${mode}${tight ? " tight" : ""}${this._body.classList.contains("arrive") ? " arrive" : ""}`;
       this._body.style.setProperty("--wx-h", mode === "wide" ? `${avail}px` : "auto");
       if (changed) this._renderAll();
       else { clearTimeout(this._rz); this._rz = setTimeout(() => this._drawCharts(), 60); }
@@ -1989,6 +1994,11 @@ tr.fc td { color: var(--wx-ink2); }
           <line data-xtl y1="0" y2="6" stroke="var(--wx-ink2)"/><rect data-xtb y="6" height="18" rx="4" fill="var(--wx-well)"/><text data-xtt y="19" text-anchor="middle" class="tick day now"></text></g></svg></div></div>`;
       this._redrawing = false;
       this._bindMeteogram();
+      if (!this._arrived && Object.keys(this._stats ?? {}).length) {
+        this._arrived = true;
+        this._body.classList.add("arrive");
+        setTimeout(() => this._body?.classList.remove("arrive"), 600);
+      }
       // A redraw while someone is reading (a new forecast, the refresh, history arriving) keeps their place and focus.
       const keep = !!this._mgHold && this._mgRange === spec.range && this._mgT != null && this._mgT >= spec.x0 && this._mgT < spec.x1;
       if (this._mgFocus) this._root.querySelector(".mg")?.focus({ preventScroll: true });
