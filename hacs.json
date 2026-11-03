@@ -1,0 +1,6 @@
+{
+  "name": "Tempest Station Card",
+  "filename": "tempest-station-card.js",
+  "render_readme": true,
+  "homeassistant": "2023.9.0"
+}
