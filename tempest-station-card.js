@@ -27,8 +27,9 @@
  * Figures are tabular.
  *
  * Motion: the needle glides between samples; a change of range, or of a
- * figure, crossfades over 220 ms; nothing moves the layout. All of it is
- * off under prefers-reduced-motion.
+ * figure, crossfades over 220 ms; a new lightning strike lights its chart
+ * once; nothing moves the layout. All of it is off under
+ * prefers-reduced-motion.
  *
  * Config:
  *   type: custom:tempest-station-card
@@ -41,7 +42,7 @@
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.3.0";
+  const VERSION = "1.3.1";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -554,7 +555,10 @@ h2 { font-size: var(--wx-fs-title); line-height: 24px; font-weight: var(--wx-w-m
 .xf { position: relative; animation: wx-ink 220ms ease-out both; }
 .xf::after { content: attr(data-old); position: absolute; left: 0; top: 0; color: var(--wx-ink); white-space: nowrap; pointer-events: none; animation: wx-fade 220ms ease-out both; }
 @keyframes wx-ink { from { color: transparent; } }
-@media (prefers-reduced-motion: reduce) { .mg-ghost { display: none; } .swap > .mg, .swap > .table-wrap, .xf { animation: none; } .xf::after { content: none; } }
+/* A new strike: the lightning strip lights faintly, as a distant flash would, and settles over a second and a half. */
+.mg-p.flash { animation: wx-flash 1500ms ease-out both; }
+@keyframes wx-flash { from { background: color-mix(in srgb, var(--wx-bolt) 22%, var(--wx-well)); } 30% { background: color-mix(in srgb, var(--wx-bolt) 14%, var(--wx-well)); } }
+@media (prefers-reduced-motion: reduce) { .mg-ghost { display: none; } .swap > .mg, .swap > .table-wrap, .xf, .mg-p.flash { animation: none; } .xf::after { content: none; } }
 .mg-p svg, .mg-axis svg { display: block; overflow: visible; }
 .mg-axis { grid-column: 2; }
 .mg-key { grid-column: 1; padding: 6px 16px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2089,7 +2093,7 @@ tr.fc td { color: var(--wx-ink2); }
 
       this._redrawing = true;
       host.innerHTML = `<div class="mg" tabindex="0" role="img" style="--wx-tile:${tileW}px;row-gap:${gap}px" aria-label="${esc(`${spec.title}: ${spec.strips.map((s) => s.name.toLowerCase()).join(", ")}. Use the arrow keys to read values; the table view lists them.`)}">
-        ${rows.map((r) => `${this._tileHtml(r, narrow)}<div class="mg-p" style="height:${r.H}px">${r.svg}</div>`).join("")}
+        ${rows.map((r) => `${this._tileHtml(r, narrow)}<div class="mg-p" data-strip="${r.s.key}" style="height:${r.H}px">${r.svg}</div>`).join("")}
         ${spec.key ? `<div class="mg-key small"><i class="${spec.key}"></i>forecast${this._fcCredit() ? ` · ${esc(this._fcCredit())}` : ""}</div>` : ""}
         <div class="mg-axis"><svg width="${W}" height="${axisH}" aria-hidden="true">${this._axis(spec, sx, padL, pw, markX)}<g data-xt visibility="hidden">
           <line data-xtl y1="0" y2="6" stroke="var(--wx-ink2)"/><rect data-xtb y="6" height="18" rx="4" fill="var(--wx-well)"/><text data-xtt y="19" text-anchor="middle" class="tick day now"></text></g></svg></div></div>`;
@@ -2407,6 +2411,22 @@ tr.fc td { color: var(--wx-ink2); }
         const v = W.ring ? W.ring[i] : 0, o = v < 0.04 ? "0" : (0.12 + 0.5 * v).toFixed(2);
         if (seg.style.strokeOpacity !== o) seg.style.strokeOpacity = o;
       });
+
+      // A strike the station has just reported lights the lightning strip once; one already on the books when the
+      // page opened does not.
+      const strike = m.bolt.last;
+      if (this._boltLast !== undefined && strike !== null && strike !== this._boltLast && m.now - strike < 5 * 60e3) this._flash();
+      this._boltLast = strike;
+    }
+
+    _flash() {
+      const well = this._root.querySelector('.mg-p[data-strip="bolt"]');
+      if (!well || !this._motion()) return;
+      well.classList.remove("flash");
+      void well.offsetWidth;
+      well.classList.add("flash");
+      clearTimeout(well._fl);
+      well._fl = setTimeout(() => well.classList.remove("flash"), 1600);
     }
 
     // The station's details, on the status: quiet unless something needs saying (then it is an alert).

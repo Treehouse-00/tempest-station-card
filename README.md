@@ -72,7 +72,7 @@ The card uses whatever units your entities report: °C or °F, km/h, m/s or mph,
 - **Honest charts.** Wind, rain and lightning start at zero, and humidity spans 0–100%. Pressure is the station's own reading (not reduced to sea level) and always spans at least 10 hPa, like a barograph, so a steady day looks steady.
 - **Privacy.** Everything runs in your browser against your own Home Assistant. The card makes no outside requests.
 - **Forecast credit.** When the forecast comes from Met.no, the card credits MET Norway beside the chart, as their data licence asks.
-- **Motion.** The needle glides, a change of range crossfades, and a figure that changes crossfades in place; nothing ever moves the layout. All of it is off when the viewer's system asks for reduced motion.
+- **Motion.** The needle glides, a change of range crossfades, a figure that changes crossfades in place, and a new lightning strike lights its chart once; nothing ever moves the layout. All of it is off when the viewer's system asks for reduced motion.
 - **High contrast.** Under forced colours (Windows High Contrast, for one) the charts, the dial and the scales keep their own colours, since colour is what they say; everything else follows the system. A request for more contrast darkens the secondary text and the grid.
 
 Not affiliated with WeatherFlow-Tempest, Inc. Tempest is their trademark.

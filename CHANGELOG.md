@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+
+- **A strike lights the strip.** When the station reports a new lightning strike, the lightning chart lights faintly, as a distant flash would, and settles over a second and a half. Once per strike, in every range, never on first paint, and off under reduced motion.
+
 ## 1.3.0
 
 - **A change of range crossfades.** Hours to Days, or chart to table, fades the old chart out over the new one in a fifth of a second; the rest of the page, and the button that was pressed, are left where they are. A refresh of the history crossfades the same way.
