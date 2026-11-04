@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1
+
+- **The card always draws on arrival.** When Home Assistant handed the card its data before placing it on the page, it stayed blank until the next update, and a dashboard reopened from the menu could come back frozen. It now draws the moment it is placed, and restarts cleanly when a dashboard is reopened.
+
 ## 1.4.0
 
 - **The chart is drawn on the card.** The grey wells behind the strips are gone: each strip has its gridlines and, under bars, a floor, and nothing else. A new strike lights the strip itself.

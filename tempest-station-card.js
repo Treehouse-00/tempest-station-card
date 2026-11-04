@@ -46,7 +46,7 @@
 (() => {
   "use strict";
   const TAG = "tempest-station-card";
-  const VERSION = "1.4.0";
+  const VERSION = "1.4.1";
   if (customElements.get(TAG)) return;
 
   /* ---------- units ---------- */
@@ -684,6 +684,9 @@ tr.fc td { color: var(--wx-ink2); }
       this._tick = setInterval(() => this._applyLive(), 5000);
       this._onResize = this._onResize ?? (() => this._layout());
       window.addEventListener("resize", this._onResize);
+      // Home Assistant can hand the card its data before attaching it, and reattaches cached dashboards: either
+      // way the card draws now, rather than waiting blank or frozen for the next update
+      if (this._hass && this._ents && !this._mounted) { this._hassKey = null; this._ingestRapid(); this._mount(); this._refresh(); }
       if (this._hass && this._ents && !this._unsubFc) this._subscribeForecast();
     }
 
